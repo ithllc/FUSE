@@ -1,0 +1,5 @@
+google-cloud-aiplatform
+google-genai
+redis
+python-dotenv
+opencv-python
