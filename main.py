@@ -3,6 +3,8 @@ import os
 import signal
 import sys
 from dotenv import load_dotenv
+from fastapi import FastAPI
+import uvicorn
 from src.vision.vision_state_capture import VisionStateCapture
 from src.audio.gemini_live_stream_handler import GeminiLiveStreamHandler
 from src.state.session_state_manager import SessionStateManager
@@ -15,7 +17,14 @@ PROJECT_ID = os.getenv("PROJECT_ID", "fuse-489616")
 LOCATION = os.getenv("LOCATION", "us-central1")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 
-async def main():
+# Initialize FastAPI app
+app = FastAPI(title="FUSE: Collaborative Brainstorming Intelligence API")
+
+@app.get("/")
+async def health_check():
+    return {"status": "active", "system": "FUSE", "project_id": PROJECT_ID}
+
+async def start_agents():
     print(f"--- Initializing FUSE: The Collaborative Brainstorming Intelligence (Project: {PROJECT_ID}) ---")
     
     # 1. Initialize State Manager (Redis)
@@ -35,20 +44,16 @@ async def main():
     print("✓ Gemini Live Stream Handler (Gemini 3.1 Flash Live) initialized.")
 
     print("\n--- System Ready ---")
-    print("To start the multimodal session, ensure your media inputs are configured.")
     
-    # In a full implementation, these would run in parallel:
-    # await asyncio.gather(
-    #     lsh.start_session(),
-    #     vsc.capture_and_analyze() # This might need its own thread/process due to CV2
-    # )
-    
-    # Placeholder for the main loop to keep the script running
-    try:
-        while True:
-            await asyncio.sleep(1)
-    except KeyboardInterrupt:
-        print("\nShutting down FUSE...")
+    # Placeholder for the main loop to keep agents active in the background
+    while True:
+        await asyncio.sleep(60)
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the agent orchestration in the background
+    asyncio.create_task(start_agents())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
