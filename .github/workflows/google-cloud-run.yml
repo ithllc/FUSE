@@ -1,0 +1,32 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Google Auth
+        # Note: This requires a Google Cloud Service Account key stored in GitHub Secrets
+        # named 'GCP_SA_KEY' and the PROJECT_ID stored in 'GCP_PROJECT_ID'.
+        # If the user is using native Cloud Build triggers, this workflow is a fallback.
+        id: auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+        continue-on-error: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        if: steps.auth.outcome == 'success'
+
+      - name: Submit Build to Cloud Build
+        if: steps.auth.outcome == 'success'
+        run: |
+          gcloud builds submit --config cloudbuild.yaml .
