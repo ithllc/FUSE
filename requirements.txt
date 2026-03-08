@@ -1,7 +1,8 @@
-google-cloud-aiplatform
-google-genai
-redis
+websockets
+uvicorn
 python-dotenv
 opencv-python-headless
 fastapi
-uvicorn
+redis
+google-cloud-aiplatform
+google-genai

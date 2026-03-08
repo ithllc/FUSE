@@ -6,74 +6,54 @@ from typing import List, Dict, Any
 from google import genai
 from google.genai import types
 
+from src.state.session_state_manager import SessionStateManager
+
 class VisionStateCapture:
     """
     Captures vision frames at 2-5 FPS and uses gemini-3.1-flash-lite-preview
     for low-latency OCR and extraction of architectural state.
     """
-    def __init__(self, project_id: str, location: str = "us-central1"):
+    def __init__(self, project_id: str, state_manager: SessionStateManager, location: str = "us-central1"):
         self.project_id = project_id
         self.location = location
+        self.state_manager = state_manager
         self.client = genai.Client(vertexai=True, project=project_id, location=location)
         self.model_id = "gemini-3.1-flash-lite-preview"
         
-    def capture_and_analyze(self, video_source=0, fps=2):
+    def process_received_frame(self, frame_bytes: bytes) -> str:
         """
-        Main loop for capturing frames and analyzing them.
+        Processes a frame received from the client-side streamer.
         """
-        cap = cv2.VideoCapture(video_source)
-        if not cap.isOpened():
-            raise IOError("Cannot open webcam")
-        
-        last_frame_time = 0
-        interval = 1.0 / fps
+        prompt = (
+            "Analyze this whiteboard image or technical sketch. "
+            "Extract all technical nodes (boxes/components) and relationships (arrows/lines). "
+            "Output ONLY the valid Mermaid.js 'graph TD' or 'graph LR' code representing the diagram. "
+            "Do not include markdown code blocks or any other text."
+        )
         
         try:
-            while True:
-                current_time = time.time()
-                if current_time - last_frame_time >= interval:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    
-                    # Process frame
-                    analysis = self._analyze_frame(frame)
-                    print(f"Analysis: {analysis}")
-                    
-                    last_frame_time = current_time
-                    
-                # Small sleep to prevent 100% CPU usage
-                time.sleep(0.01)
-        finally:
-            cap.release()
-
-    def _analyze_frame(self, frame) -> str:
-        """
-        Sends frame to Gemini for analysis.
-        """
-        # Encode frame to base64
-        _, buffer = cv2.imencode('.jpg', frame)
-        encoded_image = base64.b64encode(buffer).decode('utf-8')
-        
-        prompt = (
-            "Analyze this whiteboard image. Extract all technical nodes (boxes) and "
-            "relationships (arrows). Output as a structured list of components and edges."
-        )
-        
-        response = self.client.models.generate_content(
-            model=self.model_id,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text=prompt),
-                        types.Part.from_bytes(data=base64.b64decode(encoded_image), mime_type="image/jpeg")
-                    ]
-                )
-            ]
-        )
-        
-        return response.text
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_text(text=prompt),
+                            types.Part.from_bytes(data=frame_bytes, mime_type="image/jpeg")
+                        ]
+                    )
+                ]
+            )
+            
+            mermaid_code = response.text.strip()
+            if mermaid_code:
+                self.state_manager.update_architectural_state(mermaid_code)
+                self.state_manager.log_event("vision_update", {"mermaid_length": len(mermaid_code)})
+            
+            return mermaid_code
+        except Exception as e:
+            print(f"Vision analysis error: {e}")
+            return ""
 
 if __name__ == "__main__":
     # Placeholder for project-id

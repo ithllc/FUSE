@@ -1,64 +1,57 @@
 # Technical Implementation Guide: Fuse
 
 ## 1. System Architecture Overview
-Fuse is a real-time multimodal agent extension designed to manage a continuous stream of audio (Speech) and video (Vision) to drive a stateful Mermaid.js architectural model. It is hosted on Google Cloud Platform (GCP) and leverages Vertex AI and Google Cloud Memory Store.
+Fuse is a real-time multimodal agent extension designed to manage a continuous stream of audio (Speech) and video (Vision) to drive a stateful Mermaid.js architectural model. It follows a **Client-Server Multimodal Streaming** pattern to bridge physical environments with cloud-based reasoning.
 
 ---
 
 ## 2. Phase 1: Environment Setup (GCP Native)
-*   **Step 1**: Configure Google GenAI Vertex AI clients with `multimodal` capability enabled. Use the `global` location for the GCP endpoint to access the latest model features.
-*   **Step 2**: Ensure `MERMAID_CLI` (mmdc) is available in the environment for live diagram rendering.
-*   **Step 3**: Initialize **Google Cloud Memory Store (Redis)** to store a "Session-State Buffer" of recent physical object assignments, ensuring low-latency state access.
-*   **Step 4**: Project Configuration:
-    *   Project Name: `fuse`
-    *   Project ID: `fuse-489616`
-    *   Location: `global`
+*   **Step 1**: Configure Google GenAI Vertex AI clients with `multimodal` capability enabled.
+*   **Step 2**: **Diagram Rendering Engine**: The environment includes Node.js and `@mermaid-js/mermaid-cli` (mmdc) for high-fidelity PNG generation.
+*   **Step 3**: **State Management**: Uses **Google Cloud Memory Store (Redis)** to persist session state, architectural deltas, and proxy object registries.
+*   **Step 4**: **Network Connectivity**:
+    *   **WebSocket (`/live`)**: Bidirectional binary stream for Gemini 3.1 Flash Live (Audio/Vision/Text).
+    *   **HTTP POST (`/vision/frame`)**: Ingests individual JPEG frames for low-latency OCR via Gemini 3.1 Flash Lite.
+    *   **HTTP GET (`/render`)**: Triggers the Mermaid CLI to output the latest diagram.
 
 ---
 
 ## 3. Phase 2: Feature Implementation Logic
 
-### 3.1 Real-Time Whiteboard & Sketch Extraction (The Foundation)
+### 3.1 Cloud-Native Vision Extraction
 *   **Component**: `VisionStateCapture`.
-*   **Logic**: Captures vision frames at 2-5 FPS using **gemini-3.1-flash-lite-preview** for low-latency OCR and extraction.
-*   **Implementation**: Analyze differences between frames to detect drawing events.
-*   **Action**: If a drawing is detected, trigger a specialized agent to update the Mermaid graph.
+*   **Logic**: Instead of local camera access, the server exposes an endpoint to receive compressed JPEG frames from any client.
+*   **Process**: Frames are analyzed by **gemini-3.1-flash-lite-preview** for OCR and Mermaid code generation.
+*   **Persistence**: Results are pushed to Redis and tracked as `vision_update` events.
 
-### 3.2 "Charades" Mode (Gesture-Based Modeling)
+### 3.2 "Charades" & "Imagine" Mode (Multimodal Live)
 *   **Component**: `GeminiLiveStreamHandler`.
-*   **Logic**: Interleaves audio transcripts with vision frame metadata using **Gemini 3.1 Flash Live**.
-*   **Step-by-Step**:
-    1.  Detect "Keyword Triggers" in speech (e.g., "This node is...").
-    2.  Check the `vision_frame` for human hand positioning (using Gemini's spatial detection).
-    3.  Map the 2D coordinates of the user's hands to a "Node ID" in the current Mermaid graph.
-    4.  Update the state delta for the graph layout.
+*   **Logic**: Direct pipe between the client WebSocket and the **Gemini 3.1 Flash Live** session.
+*   **Voice Commands**: Real-time intent detection (e.g., "This stapler is a GPU") registers proxy objects in the `SessionStateManager`.
+*   **Feedback Loop**: Gemini's audio responses are streamed back to the client via the same WebSocket.
 
-### 3.3 "Imagine" Mode (Object Simulation & Substitution)
-*   **Component**: `ProxyObjectRegistry`.
-*   **Logic**: Maintain a `Dict[ObjectID, TechnicalRole]` in **Memory Store**.
-*   **Step-by-Step**:
-    1.  **Calibration**: User says "This [Object Name] is a [Component Name]."
-    2.  **Detection**: Gemini identifies the object's visual bounds.
-    3.  **Persistence**: Save mapping to Memory Store (Redis).
-    4.  **Reaction**: If the user moves a registered object, trigger logic to update the diagram to reflect spatial relationship changes.
+### 3.3 Client-Side Streamer (`client_streamer.py`)
+*   **Role**: Bridges physical hardware (Webcam, Mic) to the Cloud Run service.
+*   **Dependencies**: `opencv-python`, `websockets`, `pyaudio`.
+*   **Function**: Captures local media, compresses it, and establishes the real-time link to the `/live` and `/vision/frame` endpoints.
 
 ---
 
 ## 4. Phase 3: Multi-Agent Validation & Proofing
-*   **Critical Step**: Pipe the final architectural state into a proof orchestrator using **Gemini 3.1 Pro** for complex technical reasoning.
-*   **Validation**: If the session results in a logically impossible design, the specialized verifier agent interrupts via the Live Audio stream.
+*   **Critical Step**: The `ProofOrchestrator` periodically fetches the latest Mermaid code from Redis.
+*   **Reasoning**: Uses **Gemini 3.1 Pro** to identify single points of failure, bottlenecks, or logical errors.
+*   **Report**: Validation reports are stored in Redis and can be retrieved by the orchestrator for session feedback.
 
 ---
 
 ## 5. Phase 4: Output Generation
-1.  **Diagram**: Use high-fidelity generation to represent the final architecture.
-2.  **Report**: Auto-generate a succinct report summarizing the session's technical decisions.
-3.  **Video**: If enabled, output a summary of the object-movements and final design.
+1.  **Diagram**: On-demand PNG rendering via the `/render` endpoint.
+2.  **State**: Full session history and proxy registry available in Memory Store.
 
 ---
 
 ## 6. Implementation Compliance
 - [x] **No Text-Only**: Uses vision/voice as primary input.
-- [x] **GCP Native**: Hosted on GCP, using Vertex AI and Memory Store.
+- [x] **GCP Native**: Hosted on GCP, using Vertex AI, Cloud Build, and Memory Store.
 - [x] **Latest Models**: Leverages Gemini 3.1 Pro, 3.1 Flash Live, and gemini-3.1-flash-lite-preview.
-- [x] **Agentic**: Employs multiple specialized agents.
+- [x] **Client-Server Sync**: Uses WebSockets for low-latency multimodal interaction.
