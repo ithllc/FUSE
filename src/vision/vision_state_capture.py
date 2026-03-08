@@ -13,7 +13,7 @@ class VisionStateCapture:
     Captures vision frames at 2-5 FPS and uses gemini-3.1-flash-lite-preview
     for low-latency OCR and extraction of architectural state.
     """
-    def __init__(self, project_id: str, state_manager: SessionStateManager, location: str = "us-central1"):
+    def __init__(self, project_id: str, state_manager: SessionStateManager, location: str = "global"):
         self.project_id = project_id
         self.location = location
         self.state_manager = state_manager

@@ -47,8 +47,21 @@ class SessionStateManager:
         """
         Logs session events for multimodal history.
         """
+        import time
         key = f"{self.session_id}:events"
-        self.r.lpush(key, json.dumps({"type": event_type, "timestamp": "current", "payload": data}))
+        self.r.lpush(key, json.dumps({
+            "type": event_type,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "payload": data
+        }))
+
+    def get_events(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Retrieves the latest session events.
+        """
+        key = f"{self.session_id}:events"
+        raw_events = self.r.lrange(key, 0, limit - 1)
+        return [json.loads(e) for e in raw_events]
 
 if __name__ == "__main__":
     # In a local environment, you'd need a running Redis instance (e.g. docker run --name some-redis -d redis)

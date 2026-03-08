@@ -10,7 +10,7 @@ Fuse is a real-time multimodal agent extension designed to manage a continuous s
 *   **Step 2**: **Diagram Rendering Engine**: The environment includes Node.js and `@mermaid-js/mermaid-cli` (mmdc) for high-fidelity PNG generation.
 *   **Step 3**: **State Management**: Uses **Google Cloud Memory Store (Redis)** to persist session state, architectural deltas, and proxy object registries.
 *   **Step 4**: **Network Connectivity**:
-    *   **WebSocket (`/live`)**: Bidirectional binary stream for Gemini 3.1 Flash Live (Audio/Vision/Text).
+    *   **WebSocket (`/live`)**: Bidirectional binary stream for Gemini 2.5 Flash Live API (Audio/Vision/Text).
     *   **HTTP POST (`/vision/frame`)**: Ingests individual JPEG frames for low-latency OCR via Gemini 3.1 Flash Lite.
     *   **HTTP GET (`/render`)**: Triggers the Mermaid CLI to output the latest diagram.
 
@@ -26,7 +26,7 @@ Fuse is a real-time multimodal agent extension designed to manage a continuous s
 
 ### 3.2 "Charades" & "Imagine" Mode (Multimodal Live)
 *   **Component**: `GeminiLiveStreamHandler`.
-*   **Logic**: Direct pipe between the client WebSocket and the **Gemini 3.1 Flash Live** session.
+*   **Logic**: Direct pipe between the client WebSocket and the **Gemini 2.5 Flash Live API** session.
 *   **Voice Commands**: Real-time intent detection (e.g., "This stapler is a GPU") registers proxy objects in the `SessionStateManager`.
 *   **Feedback Loop**: Gemini's audio responses are streamed back to the client via the same WebSocket.
 
@@ -39,7 +39,7 @@ Fuse is a real-time multimodal agent extension designed to manage a continuous s
 
 ## 4. Phase 3: Multi-Agent Validation & Proofing
 *   **Critical Step**: The `ProofOrchestrator` periodically fetches the latest Mermaid code from Redis.
-*   **Reasoning**: Uses **Gemini 3.1 Pro** to identify single points of failure, bottlenecks, or logical errors.
+*   **Reasoning**: Uses **Gemini 3.1 Pro Preview** to identify single points of failure, bottlenecks, or logical errors.
 *   **Report**: Validation reports are stored in Redis and can be retrieved by the orchestrator for session feedback.
 
 ---
@@ -53,5 +53,5 @@ Fuse is a real-time multimodal agent extension designed to manage a continuous s
 ## 6. Implementation Compliance
 - [x] **No Text-Only**: Uses vision/voice as primary input.
 - [x] **GCP Native**: Hosted on GCP, using Vertex AI, Cloud Build, and Memory Store.
-- [x] **Latest Models**: Leverages Gemini 3.1 Pro, 3.1 Flash Live, and gemini-3.1-flash-lite-preview.
+- [x] **Latest Models**: Leverages Gemini 3.1 Pro Preview, 2.5 Flash Live API, and gemini-3.1-flash-lite-preview.
 - [x] **Client-Server Sync**: Uses WebSockets for low-latency multimodal interaction.

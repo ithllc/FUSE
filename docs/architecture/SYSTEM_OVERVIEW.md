@@ -19,9 +19,9 @@ graph TD
     end
 
     subgraph Google Vertex AI
-        H1 <--> G1[Gemini 3.1 Flash Live]
-        V1 <--> G2[Gemini 3.1 Flash Lite]
-        P1 <--> G3[Gemini 3.1 Pro]
+        H1 <--> G1[Gemini 2.5 Flash Live API]
+        V1 <--> G2[Gemini 3.1 Flash Lite Preview]
+        P1 <--> G3[Gemini 3.1 Pro Preview]
     end
 
     subgraph State Store
@@ -34,8 +34,8 @@ graph TD
 | Component | Responsibility | Model / Tool |
 | :--- | :--- | :--- |
 | **VisionStateCapture** | Real-time OCR and technical sketch extraction. | `gemini-3.1-flash-lite-preview` |
-| **GeminiLiveStreamHandler** | Bidirectional multimodal intent (Voice/Gestures). | `gemini-3.1-flash-live` |
-| **ProofOrchestrator** | High-fidelity architectural reasoning and validation. | `gemini-3.1-pro` |
+| **GeminiLiveStreamHandler** | Bidirectional multimodal intent (Voice/Gestures). | `gemini-2.5-flash-native-audio-preview-12-2025` |
+| **ProofOrchestrator** | High-fidelity architectural reasoning and validation. | `gemini-3.1-pro-preview` |
 | **SessionStateManager** | Low-latency state persistence and event logging. | Google Cloud Memory Store (Redis) |
 | **DiagramRenderer** | Automated PNG generation for session output. | Mermaid CLI (`mmdc`) |
 

@@ -11,12 +11,14 @@ class GeminiLiveStreamHandler:
     Interleaves audio transcripts with vision frame metadata using Gemini 3.1 Flash Live.
     Designed for real-time gesture tracking and multimodal technical intent detection.
     """
-    def __init__(self, project_id: str, state_manager: SessionStateManager, location: str = "us-central1"):
+    def __init__(self, project_id: str, state_manager: SessionStateManager, location: str = "global"):
         self.project_id = project_id
         self.location = location
         self.state_manager = state_manager
         self.client = genai.Client(vertexai=True, project=project_id, location=location)
-        self.model_id = "gemini-3.1-flash-live"
+        # No Gemini 3 series model supports the Live API yet.
+        # The Live API requires gemini-2.5-flash-native-audio-preview-12-2025.
+        self.model_id = "gemini-2.5-flash-native-audio-preview-12-2025"
 
     def get_config(self) -> types.LiveConnectConfig:
         """

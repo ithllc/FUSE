@@ -7,7 +7,7 @@ This workflow handles the transformation of a physical technical sketch into Mer
 sequenceDiagram
     participant Client as Local Client Streamer
     participant Server as FastAPI (Cloud Run)
-    participant Gemini as Gemini 3.1 Flash Lite
+    participant Gemini as Gemini 3.1 Flash Lite Preview
     participant Redis as Session State Manager
 
     Client->>Server: HTTP POST /vision/frame (Binary JPEG)
@@ -25,7 +25,7 @@ This workflow handles real-time voice-to-state object assignments.
 sequenceDiagram
     participant Client as Local Client (Audio Capture)
     participant Server as WebSocket /live
-    participant GeminiLive as Gemini 3.1 Flash Live
+    participant GeminiLive as Gemini 2.5 Flash Live API
     participant Redis as Session State Manager
 
     Client->>Server: Binary Audio ("This stapler is a GPU")

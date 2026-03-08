@@ -13,9 +13,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Google Auth
-        # Note: This requires a Google Cloud Service Account key stored in GitHub Secrets
-        # named 'GCP_SA_KEY' and the PROJECT_ID stored in 'GCP_PROJECT_ID'.
-        # If the user is using native Cloud Build triggers, this workflow is a fallback.
         id: auth
         uses: 'google-github-actions/auth@v2'
         with:
@@ -29,4 +26,6 @@ jobs:
       - name: Submit Build to Cloud Build
         if: steps.auth.outcome == 'success'
         run: |
-          gcloud builds submit --config cloudbuild.yaml .
+          gcloud builds submit --config cloudbuild.yaml \
+            --substitutions=SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7) \
+            --project=${{ secrets.GCP_PROJECT_ID || 'fuse-489616' }} .

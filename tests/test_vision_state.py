@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from src.vision.vision_state_capture import VisionStateCapture
 
 @pytest.fixture
@@ -10,34 +10,34 @@ def mock_state_manager():
 def vision_capture(mock_state_manager):
     return VisionStateCapture(project_id="test-project", state_manager=mock_state_manager)
 
-def test_analyze_frame_returns_mermaid(vision_capture):
-    # Mock the Gemini client response
+def test_process_received_frame_returns_mermaid(vision_capture):
     mock_response = MagicMock()
     mock_response.text = "graph TD\nA-->B"
     vision_capture.client.models.generate_content = MagicMock(return_value=mock_response)
-    
-    # Simulate a frame analysis
-    import numpy as np
-    dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
-    
-    result = vision_capture._analyze_frame(dummy_frame)
-    
+
+    dummy_frame = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # fake JPEG bytes
+
+    result = vision_capture.process_received_frame(dummy_frame)
+
     assert "graph TD" in result
     assert "A-->B" in result
 
-def test_capture_updates_state(vision_capture, mock_state_manager):
-    # Mock _analyze_frame to return a specific diagram
-    vision_capture._analyze_frame = MagicMock(return_value="graph TD; X-->Y")
-    
-    # Mock cv2.VideoCapture to return one frame and then stop
-    with patch('cv2.VideoCapture') as mock_cap:
-        mock_instance = mock_cap.return_value
-        mock_instance.isOpened.return_value = True
-        mock_instance.read.side_effect = [(True, "frame1"), (False, None)]
-        
-        # Run a single iteration of capture (mocking the time/loop)
-        with patch('time.sleep', return_value=None):
-            vision_capture.capture_and_analyze(fps=100) # Fast interval for test
-            
+def test_process_received_frame_updates_state(vision_capture, mock_state_manager):
+    mock_response = MagicMock()
+    mock_response.text = "graph TD; X-->Y"
+    vision_capture.client.models.generate_content = MagicMock(return_value=mock_response)
+
+    dummy_frame = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+
+    vision_capture.process_received_frame(dummy_frame)
+
     mock_state_manager.update_architectural_state.assert_called_with("graph TD; X-->Y")
     mock_state_manager.log_event.assert_called()
+
+def test_process_received_frame_handles_error(vision_capture, mock_state_manager):
+    vision_capture.client.models.generate_content = MagicMock(side_effect=Exception("API error"))
+
+    result = vision_capture.process_received_frame(b"\xff\xd8\xff\xe0")
+
+    assert result == ""
+    mock_state_manager.update_architectural_state.assert_not_called()

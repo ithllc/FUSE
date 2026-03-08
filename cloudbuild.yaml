@@ -1,11 +1,17 @@
 steps:
-  # Build the container image
+  # Build the container image using Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/${PROJECT_ID}/fuse-service', '.']
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:${SHORT_SHA}', '.']
 
-  # Push the container image to Container Registry
+  # Tag as latest
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/${PROJECT_ID}/fuse-service']
+    args: ['tag', 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:${SHORT_SHA}', 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:latest']
+
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:${SHORT_SHA}']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:latest']
 
   # Deploy container image to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -15,17 +21,25 @@ steps:
       - 'deploy'
       - 'fuse-service'
       - '--image'
-      - 'gcr.io/${PROJECT_ID}/fuse-service'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:${SHORT_SHA}'
       - '--region'
       - 'us-central1'
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
       - '--set-env-vars'
-      - 'REDIS_HOST=10.8.239.3,PROJECT_ID=${PROJECT_ID},LOCATION=us-central1'
+      - 'REDIS_HOST=10.8.239.3,PROJECT_ID=${PROJECT_ID},LOCATION=global'
+      - '--vpc-connector'
+      - 'fuse-vpc-connector'
+      - '--memory'
+      - '1Gi'
+      - '--timeout'
+      - '300'
+      - '--session-affinity'
       - '--project'
       - '${PROJECT_ID}'
       - '--quiet'
 
 images:
-  - 'gcr.io/${PROJECT_ID}/fuse-service'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:${SHORT_SHA}'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:latest'

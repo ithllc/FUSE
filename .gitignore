@@ -1,4 +1,4 @@
-# OpenTaxCopilot Git Ignore
+# FUSE Git Ignore
 
 # Sensitive Credentials (Mandatory Protection)
 argos-proof-of-concept-6da2ec3a22f0.json
@@ -42,3 +42,4 @@ Thumbs.db
 
 # Gemini local configuration
 .gemini/
+.claude/

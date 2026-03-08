@@ -29,8 +29,12 @@ class DiagramRenderer:
         try:
             # Execute mmdc command
             # Note: --puppeteerConfigFile may be needed in some Docker environments
+            puppeteer_cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "puppeteer-config.json")
+            cmd = ["mmdc", "-i", tmp_path, "-o", output_path, "-t", "forest", "-b", "white"]
+            if os.path.exists(puppeteer_cfg):
+                cmd.extend(["-p", puppeteer_cfg])
             result = subprocess.run(
-                ["mmdc", "-i", tmp_path, "-o", output_path, "-t", "forest", "-b", "white"],
+                cmd,
                 capture_output=True,
                 text=True,
                 check=True

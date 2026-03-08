@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FUSE - Collaborative Brainstorming Intelligence</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0f1117;
+            color: #e1e4e8;
+            min-height: 100vh;
+        }
+        header {
+            background: linear-gradient(135deg, #1a1d27, #252830);
+            border-bottom: 1px solid #30363d;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #58a6ff, #bc8cff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .logo span {
+            font-size: 13px;
+            color: #8b949e;
+        }
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .status-badge.connected { background: #0d2818; color: #3fb950; }
+        .status-badge.disconnected { background: #2d1117; color: #f85149; }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 16px;
+            padding: 16px;
+            height: calc(100vh - 68px);
+        }
+        .panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #1c2129;
+        }
+        .panel-header h2 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #c9d1d9;
+        }
+        .panel-body {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        /* Video Panel */
+        #videoPanel { grid-column: 1; grid-row: 1; }
+        #localVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 8px;
+            background: #0d1117;
+        }
+        .video-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #484f58;
+            gap: 12px;
+        }
+        .video-placeholder svg { width: 48px; height: 48px; opacity: 0.5; }
+
+        /* Diagram Panel */
+        #diagramPanel { grid-column: 2; grid-row: 1; }
+        #mermaidOutput {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            background: #fff;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        #mermaidOutput svg { max-width: 100%; max-height: 100%; }
+        .diagram-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #484f58;
+            gap: 8px;
+            text-align: center;
+        }
+
+        /* Chat / Live Transcript Panel */
+        #chatPanel { grid-column: 1; grid-row: 2; }
+        .messages {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100%;
+        }
+        .msg-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding-bottom: 8px;
+        }
+        .msg {
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+            max-width: 85%;
+        }
+        .msg.user {
+            background: #1f3a5f;
+            color: #58a6ff;
+            align-self: flex-end;
+            border-bottom-right-radius: 2px;
+        }
+        .msg.fuse {
+            background: #1c2129;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            align-self: flex-start;
+            border-bottom-left-radius: 2px;
+        }
+        .msg.system {
+            background: #2d1f0e;
+            color: #d29922;
+            font-size: 12px;
+            align-self: center;
+            text-align: center;
+        }
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+        .input-row input {
+            flex: 1;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #e1e4e8;
+            font-size: 14px;
+            outline: none;
+        }
+        .input-row input:focus { border-color: #58a6ff; }
+        .input-row input::placeholder { color: #484f58; }
+
+        /* Validation / Report Panel */
+        #validationPanel { grid-column: 2; grid-row: 2; }
+        .report-content {
+            font-family: 'SFMono-Regular', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: #c9d1d9;
+        }
+        .report-valid { color: #3fb950; }
+        .report-invalid { color: #f85149; }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            background: #21262d;
+            color: #c9d1d9;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn:hover { background: #30363d; }
+        .btn-primary {
+            background: #238636;
+            border-color: #2ea043;
+            color: #fff;
+        }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-blue {
+            background: #1f6feb;
+            border-color: #388bfd;
+            color: #fff;
+        }
+        .btn-blue:hover { background: #388bfd; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .btn-group { display: flex; gap: 6px; }
+
+        /* Proxy Table */
+        .proxy-table {
+            width: 100%;
+            font-size: 13px;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+        .proxy-table th, .proxy-table td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid #21262d;
+        }
+        .proxy-table th {
+            color: #8b949e;
+            font-weight: 500;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0;
+        }
+        .tab {
+            padding: 8px 16px;
+            font-size: 13px;
+            color: #8b949e;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+        .tab.active {
+            color: #58a6ff;
+            border-bottom-color: #58a6ff;
+        }
+        .tab-content { display: none; height: 100%; }
+        .tab-content.active { display: flex; flex-direction: column; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <h1>FUSE</h1>
+            <span>Collaborative Brainstorming Intelligence</span>
+        </div>
+        <div class="btn-group">
+            <button class="btn" id="btnCamera" onclick="toggleCamera()">Start Camera</button>
+            <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Connect Live</button>
+            <div class="status-badge disconnected" id="statusBadge">
+                <div class="status-dot"></div>
+                <span id="statusText">Disconnected</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-grid">
+        <!-- Video Feed -->
+        <div class="panel" id="videoPanel">
+            <div class="panel-header">
+                <h2>Live Camera Feed</h2>
+                <div class="btn-group">
+                    <button class="btn btn-sm" onclick="captureFrame()">Capture Frame</button>
+                </div>
+            </div>
+            <div class="panel-body" style="padding:8px;">
+                <video id="localVideo" autoplay muted playsinline style="display:none;"></video>
+                <canvas id="captureCanvas" style="display:none;"></canvas>
+                <div class="video-placeholder" id="videoPlaceholder">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                    <span>Click "Start Camera" to begin</span>
+                    <span style="font-size:12px;">Captures whiteboard sketches for diagram extraction</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Diagram Output -->
+        <div class="panel" id="diagramPanel">
+            <div class="panel-header">
+                <h2>Architecture Diagram</h2>
+                <div class="btn-group">
+                    <button class="btn btn-sm" onclick="fetchRenderedDiagram()">Render PNG</button>
+                    <button class="btn btn-sm" onclick="refreshMermaid()">Refresh</button>
+                </div>
+            </div>
+            <div class="panel-body" style="padding:8px;">
+                <div id="mermaidOutput">
+                    <div class="diagram-placeholder" id="diagramPlaceholder">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="#484f58">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
+                        </svg>
+                        <span>No diagram yet</span>
+                        <span style="font-size:12px;">Send a sketch or use "Imagine" mode to build one</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat / Live Transcript -->
+        <div class="panel" id="chatPanel">
+            <div class="panel-header">
+                <h2>Session</h2>
+                <div class="tabs">
+                    <div class="tab active" onclick="switchTab('transcript')">Transcript</div>
+                    <div class="tab" onclick="switchTab('proxies')">Proxy Objects</div>
+                </div>
+            </div>
+            <div class="panel-body">
+                <div class="tab-content active" id="tab-transcript">
+                    <div class="messages">
+                        <div class="msg-list" id="msgList">
+                            <div class="msg system">FUSE session started. Use voice commands or type below.</div>
+                        </div>
+                        <div class="input-row">
+                            <input type="text" id="cmdInput" placeholder='Try: "This stapler is our GPU cluster"' onkeydown="if(event.key==='Enter')sendCommand()">
+                            <button class="btn btn-primary" onclick="sendCommand()">Send</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-content" id="tab-proxies">
+                    <table class="proxy-table">
+                        <thead><tr><th>Object</th><th>Technical Role</th></tr></thead>
+                        <tbody id="proxyTableBody">
+                            <tr><td colspan="2" style="color:#484f58;text-align:center;padding:24px;">No proxy objects registered yet</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Validation Report -->
+        <div class="panel" id="validationPanel">
+            <div class="panel-header">
+                <h2>Architecture Validation</h2>
+                <button class="btn btn-sm btn-blue" onclick="runValidation()">Run Validation</button>
+            </div>
+            <div class="panel-body">
+                <div class="report-content" id="validationReport" style="color:#484f58;">
+Click "Run Validation" to analyze the current architecture for logical inconsistencies, bottlenecks, or single points of failure.
+
+Powered by Gemini 3.1 Pro Preview.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+        const BASE = window.location.origin;
+        const WS_URL = BASE.replace('http://', 'ws://').replace('https://', 'wss://') + '/live';
+        let ws = null;
+        let cameraStream = null;
+        let frameInterval = null;
+        const proxyRegistry = {};
+
+        // --- WebSocket ---
+        function toggleWebSocket() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            } else {
+                connectWebSocket();
+            }
+        }
+
+        function connectWebSocket() {
+            addMsg('system', 'Connecting to FUSE Live...');
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                setStatus(true);
+                addMsg('system', 'Connected to Gemini Live API session.');
+                document.getElementById('btnConnect').textContent = 'Disconnect';
+            };
+
+            ws.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.text) {
+                            addMsg('fuse', data.text);
+                            checkForMermaid(data.text);
+                        }
+                    } catch (e) {
+                        addMsg('fuse', event.data);
+                    }
+                }
+                // Binary audio responses would be handled here for playback
+            };
+
+            ws.onclose = () => {
+                setStatus(false);
+                addMsg('system', 'Disconnected from live session.');
+                document.getElementById('btnConnect').textContent = 'Connect Live';
+            };
+
+            ws.onerror = (e) => {
+                addMsg('system', 'WebSocket error. Check server logs.');
+            };
+        }
+
+        function setStatus(connected) {
+            const badge = document.getElementById('statusBadge');
+            const text = document.getElementById('statusText');
+            badge.className = 'status-badge ' + (connected ? 'connected' : 'disconnected');
+            text.textContent = connected ? 'Live' : 'Disconnected';
+        }
+
+        // --- Camera ---
+        async function toggleCamera() {
+            const video = document.getElementById('localVideo');
+            const placeholder = document.getElementById('videoPlaceholder');
+            const btn = document.getElementById('btnCamera');
+
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+                video.style.display = 'none';
+                placeholder.style.display = 'flex';
+                btn.textContent = 'Start Camera';
+                if (frameInterval) clearInterval(frameInterval);
+                return;
+            }
+
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = cameraStream;
+                video.style.display = 'block';
+                placeholder.style.display = 'none';
+                btn.textContent = 'Stop Camera';
+
+                // Auto-stream frames if WebSocket is connected
+                frameInterval = setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        sendVideoFrame();
+                    }
+                }, 500); // 2 FPS
+            } catch (e) {
+                addMsg('system', 'Camera access denied: ' + e.message);
+            }
+        }
+
+        function sendVideoFrame() {
+            const video = document.getElementById('localVideo');
+            const canvas = document.getElementById('captureCanvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, 640, 480);
+            canvas.toBlob((blob) => {
+                if (blob && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(blob);
+                }
+            }, 'image/jpeg', 0.7);
+        }
+
+        // --- Capture single frame for vision analysis ---
+        async function captureFrame() {
+            const video = document.getElementById('localVideo');
+            if (!cameraStream) {
+                addMsg('system', 'Start camera first to capture a frame.');
+                return;
+            }
+
+            const canvas = document.getElementById('captureCanvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, 640, 480);
+
+            canvas.toBlob(async (blob) => {
+                addMsg('system', 'Sending frame for vision analysis...');
+                try {
+                    const resp = await fetch(BASE + '/vision/frame', {
+                        method: 'POST',
+                        body: blob,
+                        headers: { 'Content-Type': 'application/octet-stream' }
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'success') {
+                        addMsg('system', `Frame analyzed. Mermaid code length: ${data.mermaid_length}`);
+                        refreshMermaid();
+                    } else {
+                        addMsg('system', 'Vision error: ' + data.message);
+                    }
+                } catch (e) {
+                    addMsg('system', 'Failed to send frame: ' + e.message);
+                }
+            }, 'image/jpeg', 0.85);
+        }
+
+        // --- Commands ---
+        async function sendCommand() {
+            const input = document.getElementById('cmdInput');
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = '';
+
+            addMsg('user', text);
+
+            // If WebSocket is open, send through live session
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ text: text }));
+                return;
+            }
+
+            // Fallback to HTTP command endpoint
+            try {
+                const resp = await fetch(BASE + '/command?text=' + encodeURIComponent(text), {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    addMsg('fuse', data.response);
+                    // Track proxy assignments locally
+                    if (text.toLowerCase().includes(' is ')) {
+                        const parts = text.toLowerCase().split(' is ');
+                        const obj = parts[0].replace('this ', '').trim();
+                        const role = parts[1].replace('our ', '').replace('a ', '').trim();
+                        proxyRegistry[obj] = role;
+                        updateProxyTable();
+                    }
+                } else {
+                    addMsg('system', data.message);
+                }
+            } catch (e) {
+                addMsg('system', 'Command failed: ' + e.message);
+            }
+        }
+
+        // --- Diagram ---
+        async function refreshMermaid() {
+            try {
+                const resp = await fetch(BASE + '/state/mermaid');
+                const data = await resp.json();
+                if (data.mermaid_code) {
+                    renderMermaid(data.mermaid_code);
+                }
+            } catch (e) {
+                // If /state/mermaid doesn't exist, try render
+                fetchRenderedDiagram();
+            }
+        }
+
+        async function renderMermaid(code) {
+            const container = document.getElementById('mermaidOutput');
+            try {
+                const { svg } = await mermaid.render('mermaidDiagram', code);
+                container.innerHTML = svg;
+            } catch (e) {
+                container.innerHTML = '<div class="diagram-placeholder"><span>Mermaid render error</span><span style="font-size:12px;color:#f85149;">' + e.message + '</span></div>';
+            }
+        }
+
+        async function fetchRenderedDiagram() {
+            try {
+                const resp = await fetch(BASE + '/render');
+                if (resp.headers.get('content-type')?.includes('image/png')) {
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    document.getElementById('mermaidOutput').innerHTML = `<img src="${url}" style="max-width:100%;max-height:100%;">`;
+                } else {
+                    const data = await resp.json();
+                    addMsg('system', data.message || 'No diagram to render.');
+                }
+            } catch (e) {
+                addMsg('system', 'Render failed: ' + e.message);
+            }
+        }
+
+        function checkForMermaid(text) {
+            if (text.includes('graph ') || text.includes('flowchart ') || text.includes('sequenceDiagram')) {
+                renderMermaid(text);
+            }
+        }
+
+        // --- Validation ---
+        async function runValidation() {
+            const report = document.getElementById('validationReport');
+            report.textContent = 'Running validation with Gemini 3.1 Pro Preview...';
+            report.className = 'report-content';
+
+            try {
+                const resp = await fetch(BASE + '/validate');
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    report.textContent = data.validation_report;
+                    report.className = 'report-content ' + (data.is_valid ? 'report-valid' : 'report-invalid');
+                } else {
+                    report.textContent = data.message || 'Validation unavailable.';
+                }
+            } catch (e) {
+                report.textContent = 'Validation error: ' + e.message;
+            }
+        }
+
+        // --- UI Helpers ---
+        function addMsg(type, text) {
+            const list = document.getElementById('msgList');
+            const div = document.createElement('div');
+            div.className = 'msg ' + type;
+            div.textContent = text;
+            list.appendChild(div);
+            list.scrollTop = list.scrollHeight;
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).classList.add('active');
+        }
+
+        function updateProxyTable() {
+            const tbody = document.getElementById('proxyTableBody');
+            const entries = Object.entries(proxyRegistry);
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" style="color:#484f58;text-align:center;padding:24px;">No proxy objects registered yet</td></tr>';
+                return;
+            }
+            tbody.innerHTML = entries.map(([obj, role]) =>
+                `<tr><td>${obj}</td><td>${role}</td></tr>`
+            ).join('');
+        }
+    </script>
+</body>
+</html>
