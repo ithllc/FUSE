@@ -5,13 +5,19 @@ FUSE uses a **Client-Server Multimodal Streaming** pattern. It separates physica
 
 ```mermaid
 graph TD
-    subgraph Local Client
+    subgraph Browser Client
+        B1[Webcam + Microphone] --> B2[Web UI - index.html]
+    end
+
+    subgraph Python Client
         C1[Webcam/Microphone] --> C2[client_streamer.py]
     end
 
     subgraph Cloud Run (FastAPI)
-        C2 -- WebSocket (/live) --> H1[GeminiLiveStreamHandler]
-        C2 -- HTTP POST (/vision/frame) --> V1[VisionStateCapture]
+        B2 -- WebSocket (/live) --> H1[GeminiLiveStreamHandler]
+        C2 -- WebSocket (/live) --> H1
+        B2 -- HTTP POST (/vision/frame) --> V1[VisionStateCapture]
+        C2 -- HTTP POST (/vision/frame) --> V1
         H1 <--> S1[SessionStateManager]
         V1 --> S1
         S1 -- Periodic --> P1[ProofOrchestrator]
@@ -39,7 +45,15 @@ graph TD
 | **SessionStateManager** | Low-latency state persistence and event logging. | Google Cloud Memory Store (Redis) |
 | **DiagramRenderer** | Automated PNG generation for session output. | Mermaid CLI (`mmdc`) |
 
-## 3. Communication Protocols
-*   **WebSockets (`/live`)**: Handles the raw binary audio and vision frames for the Gemini Live session.
-*   **REST API (`/vision/frame`)**: Ingests high-resolution JPEG frames for structural diagram analysis.
-*   **Internal RPC**: Used for coordination between the FastAPI orchestrator and the Vertex AI models.
+## 3. Client Options
+
+| Client | Voice Input | Vision Input | Use Case |
+| :--- | :--- | :--- | :--- |
+| **Web UI** (`index.html`) | Browser microphone (Web Audio API, PCM16 @ 16kHz) | Browser webcam (getUserMedia) | Primary interface for brainstorming sessions |
+| **Python Client** (`client_streamer.py`) | PyAudio microphone capture | OpenCV webcam capture | Headless / CLI environments |
+
+## 4. Communication Protocols
+*   **WebSockets (`/live`)**: Handles bidirectional binary audio (PCM16) and vision frames between clients and the Gemini Live API session.
+*   **REST API (`/vision/frame`)**: Ingests high-resolution JPEG frames for structural diagram analysis via Gemini 3.1 Flash Lite.
+*   **REST API (`/state/mermaid`)**: Returns the current Mermaid.js architectural state from Redis.
+*   **REST API (`/validate`)**: Triggers on-demand architecture validation via ProofOrchestrator.

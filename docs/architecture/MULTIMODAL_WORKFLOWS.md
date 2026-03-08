@@ -19,11 +19,30 @@ sequenceDiagram
 ```
 
 ## 2. "Imagine" Mode: Proxy Object Registry (Live Stream)
-This workflow handles real-time voice-to-state object assignments.
+This workflow handles real-time voice-to-state object assignments. Voice input is supported from both the **Web UI** (browser microphone via Web Audio API) and the **Python client** (`client_streamer.py` via PyAudio).
 
+### Browser Voice Flow
 ```mermaid
 sequenceDiagram
-    participant Client as Local Client (Audio Capture)
+    participant Browser as Web UI (index.html)
+    participant Mic as Browser Microphone
+    participant Server as WebSocket /live
+    participant GeminiLive as Gemini 2.5 Flash Live API
+    participant Speaker as Browser Speakers
+
+    Browser->>Mic: getUserMedia({audio})
+    Mic->>Browser: PCM16 @ 16kHz (ScriptProcessorNode)
+    Browser->>Server: Binary Audio Frames (Int16Array)
+    Server->>GeminiLive: Forward Audio Bytes
+    GeminiLive-->>Server: Text Response + Audio Response
+    Server-->>Browser: Text (JSON) + Audio (PCM16 Binary)
+    Browser->>Speaker: AudioContext playback (24kHz)
+```
+
+### Python Client Voice Flow
+```mermaid
+sequenceDiagram
+    participant Client as client_streamer.py
     participant Server as WebSocket /live
     participant GeminiLive as Gemini 2.5 Flash Live API
     participant Redis as Session State Manager

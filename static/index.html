@@ -231,6 +231,18 @@
             color: #fff;
         }
         .btn-blue:hover { background: #388bfd; }
+        .btn-mic {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        .btn-mic.active {
+            background: #6e1a1a;
+            border-color: #f85149;
+            color: #f85149;
+            animation: mic-pulse 1.5s infinite;
+        }
+        @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.4); } 50% { box-shadow: 0 0 0 6px rgba(248,81,73,0); } }
         .btn-sm { padding: 4px 10px; font-size: 12px; }
         .btn-group { display: flex; gap: 6px; }
 
@@ -282,6 +294,7 @@
         </div>
         <div class="btn-group">
             <button class="btn" id="btnCamera" onclick="toggleCamera()">Start Camera</button>
+            <button class="btn btn-mic" id="btnMic" onclick="toggleMic()">Start Mic</button>
             <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Connect Live</button>
             <div class="status-badge disconnected" id="statusBadge">
                 <div class="status-dot"></div>
@@ -296,6 +309,7 @@
             <div class="panel-header">
                 <h2>Live Camera Feed</h2>
                 <div class="btn-group">
+                    <span id="micIndicator" style="display:none;font-size:12px;color:#f85149;font-weight:500;">MIC LIVE</span>
                     <button class="btn btn-sm" onclick="captureFrame()">Capture Frame</button>
                 </div>
             </div>
@@ -391,6 +405,14 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let frameInterval = null;
         const proxyRegistry = {};
 
+        // --- Audio state ---
+        let micActive = false;
+        let audioContext = null;
+        let micStream = null;
+        let micProcessor = null;
+        let playbackCtx = null;
+        const SAMPLE_RATE = 16000; // 16kHz mono PCM16 for Gemini Live API
+
         // --- WebSocket ---
         function toggleWebSocket() {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -403,6 +425,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
         function connectWebSocket() {
             addMsg('system', 'Connecting to FUSE Live...');
             ws = new WebSocket(WS_URL);
+            ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
                 setStatus(true);
@@ -421,14 +444,18 @@ Powered by Gemini 3.1 Pro Preview.</div>
                     } catch (e) {
                         addMsg('fuse', event.data);
                     }
+                } else if (event.data instanceof ArrayBuffer) {
+                    // Binary audio response from Gemini - play it back
+                    playAudioResponse(event.data);
                 }
-                // Binary audio responses would be handled here for playback
             };
 
             ws.onclose = () => {
                 setStatus(false);
                 addMsg('system', 'Disconnected from live session.');
                 document.getElementById('btnConnect').textContent = 'Connect Live';
+                // Stop mic if it was streaming
+                if (micActive) toggleMic();
             };
 
             ws.onerror = (e) => {
@@ -441,6 +468,92 @@ Powered by Gemini 3.1 Pro Preview.</div>
             const text = document.getElementById('statusText');
             badge.className = 'status-badge ' + (connected ? 'connected' : 'disconnected');
             text.textContent = connected ? 'Live' : 'Disconnected';
+        }
+
+        // --- Microphone Capture (Web Audio API -> PCM16 @ 16kHz) ---
+        async function toggleMic() {
+            const btn = document.getElementById('btnMic');
+            const indicator = document.getElementById('micIndicator');
+
+            if (micActive) {
+                // Stop microphone
+                micActive = false;
+                if (micProcessor) { micProcessor.disconnect(); micProcessor = null; }
+                if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+                if (audioContext) { audioContext.close(); audioContext = null; }
+                btn.textContent = 'Start Mic';
+                btn.classList.remove('active');
+                indicator.style.display = 'none';
+                addMsg('system', 'Microphone stopped.');
+                return;
+            }
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMsg('system', 'Connect to Live session first before starting the microphone.');
+                return;
+            }
+
+            try {
+                micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: SAMPLE_RATE,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+
+                audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+                const source = audioContext.createMediaStreamSource(micStream);
+
+                // ScriptProcessorNode for PCM capture (widely supported)
+                // Buffer size 4096 at 16kHz = ~256ms chunks
+                micProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                micProcessor.onaudioprocess = (e) => {
+                    if (!micActive || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+                    const float32 = e.inputBuffer.getChannelData(0);
+                    // Convert Float32 [-1,1] to Int16 PCM
+                    const pcm16 = new Int16Array(float32.length);
+                    for (let i = 0; i < float32.length; i++) {
+                        const s = Math.max(-1, Math.min(1, float32[i]));
+                        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    ws.send(pcm16.buffer);
+                };
+
+                source.connect(micProcessor);
+                micProcessor.connect(audioContext.destination);
+
+                micActive = true;
+                btn.textContent = 'Stop Mic';
+                btn.classList.add('active');
+                indicator.style.display = 'inline';
+                addMsg('system', 'Microphone active - speak your commands. Audio is streaming to Gemini Live.');
+            } catch (e) {
+                addMsg('system', 'Microphone access denied: ' + e.message);
+            }
+        }
+
+        // --- Audio Playback (PCM16 from Gemini -> speakers) ---
+        function playAudioResponse(arrayBuffer) {
+            if (!playbackCtx) {
+                playbackCtx = new AudioContext({ sampleRate: 24000 }); // Gemini outputs 24kHz
+            }
+
+            const pcm16 = new Int16Array(arrayBuffer);
+            const float32 = new Float32Array(pcm16.length);
+            for (let i = 0; i < pcm16.length; i++) {
+                float32[i] = pcm16[i] / 0x7FFF;
+            }
+
+            const audioBuffer = playbackCtx.createBuffer(1, float32.length, 24000);
+            audioBuffer.getChannelData(0).set(float32);
+
+            const source = playbackCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(playbackCtx.destination);
+            source.start();
         }
 
         // --- Camera ---
