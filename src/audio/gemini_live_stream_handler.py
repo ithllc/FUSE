@@ -15,17 +15,23 @@ class GeminiLiveStreamHandler:
         self.project_id = project_id
         self.location = location
         self.state_manager = state_manager
-        self.client = genai.Client(vertexai=True, project=project_id, location=location)
-        # No Gemini 3 series model supports the Live API yet.
-        # The Live API requires gemini-2.5-flash-native-audio-preview-12-2025.
-        self.model_id = "gemini-2.5-flash-native-audio-preview-12-2025"
+        # Live API on Vertex AI requires us-central1 (not "global")
+        live_location = "us-central1" if location == "global" else location
+        self.client = genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=live_location,
+            http_options={"api_version": "v1beta1"}
+        )
+        # Vertex AI Live API model (GA)
+        self.model_id = "gemini-live-2.5-flash-native-audio"
 
     def get_config(self) -> types.LiveConnectConfig:
         """
         Returns the configuration for the Gemini 3.1 Flash Live session.
         """
         return types.LiveConnectConfig(
-            response_modalities=["AUDIO", "TEXT"],
+            response_modalities=["AUDIO"],
             system_instruction=types.Content(
                 parts=[
                     types.Part.from_text(
@@ -52,7 +58,7 @@ class GeminiLiveStreamHandler:
             async with self.client.aio.live.connect(
                 model=self.model_id,
                 config=types.LiveConnectConfig(
-                    response_modalities=["AUDIO", "TEXT"]
+                    response_modalities=["AUDIO"]
                 )
             ) as session:
                 print("Live session connected. Ready for gesture and voice commands.")

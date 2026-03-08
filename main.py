@@ -1,11 +1,18 @@
 import asyncio
+import logging
 import os
 import json
+import sys
+import traceback
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+
+# Configure logging to stderr so Cloud Run captures it
+logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger("fuse")
 
 from src.vision.vision_state_capture import VisionStateCapture
 from src.audio.gemini_live_stream_handler import GeminiLiveStreamHandler
@@ -74,13 +81,16 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     await websocket.accept()
-    print("WebSocket connection established.")
+    logger.info("WebSocket connection established.")
+    logger.info(f"Live handler model: {live_handler.model_id}, location: {live_handler.location}")
 
     try:
         async with live_handler.client.aio.live.connect(
             model=live_handler.model_id,
             config=live_handler.get_config()
         ) as session:
+            logger.info("Gemini Live session connected successfully.")
+            await websocket.send_text(json.dumps({"text": "[FUSE] Live session active. You can speak or type."}))
 
             async def receive_from_client():
                 try:
@@ -89,26 +99,50 @@ async def websocket_endpoint(websocket: WebSocket):
                         if "bytes" in message:
                             await session.send(input=message["bytes"], end_of_turn=False)
                         elif "text" in message:
-                            await session.send(input=message["text"], end_of_turn=True)
+                            raw = message["text"]
+                            # Browser sends JSON like {"text": "..."} - extract inner text
+                            try:
+                                parsed = json.loads(raw)
+                                text_val = parsed.get("text", raw) if isinstance(parsed, dict) else raw
+                            except (json.JSONDecodeError, TypeError):
+                                text_val = raw
+                            await session.send(input=text_val, end_of_turn=True)
                 except WebSocketDisconnect:
-                    pass
+                    logger.info("Client disconnected from WebSocket.")
 
             async def send_to_client():
                 try:
-                    async for response in session:
-                        if response.text:
+                    async for response in session.receive():
+                        if response is None:
+                            break
+                        # Handle server_content with model_turn parts
+                        if hasattr(response, 'server_content') and response.server_content:
+                            sc = response.server_content
+                            if hasattr(sc, 'model_turn') and sc.model_turn and sc.model_turn.parts:
+                                for part in sc.model_turn.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        await websocket.send_text(json.dumps({"text": part.text}))
+                                    if hasattr(part, 'inline_data') and part.inline_data:
+                                        await websocket.send_bytes(part.inline_data.data)
+                        # Handle direct text/data attributes
+                        if hasattr(response, 'text') and response.text:
                             await websocket.send_text(json.dumps({"text": response.text}))
-                        if response.audio:
-                            await websocket.send_bytes(response.audio)
+                        if hasattr(response, 'data') and response.data:
+                            await websocket.send_bytes(response.data)
                 except Exception as e:
-                    print(f"Error sending to client: {e}")
+                    logger.error(f"Error in send_to_client: {e}\n{traceback.format_exc()}")
 
             await asyncio.gather(receive_from_client(), send_to_client())
 
     except Exception as e:
-        print(f"Live session error: {e}")
+        error_msg = f"Live session error: {type(e).__name__}: {e}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        try:
+            await websocket.send_text(json.dumps({"text": f"[ERROR] {error_msg}"}))
+        except Exception:
+            pass
     finally:
-        print("WebSocket connection closed.")
+        logger.info("WebSocket connection closed.")
 
 @app.get("/render")
 async def render_diagram():
