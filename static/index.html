@@ -59,11 +59,18 @@
         .main-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            grid-template-rows: 1fr 1fr;
             gap: 16px;
             padding: 16px;
             height: calc(100vh - 68px);
         }
+        .left-column {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            min-height: 0;
+        }
+        .left-column #videoPanel { flex: 2; min-height: 0; }
+        .left-column #chatPanel { flex: 1; min-height: 0; }
         .panel {
             background: #161b22;
             border: 1px solid #30363d;
@@ -91,8 +98,39 @@
             overflow-y: auto;
         }
 
+        /* Media control icon buttons */
+        .media-controls {
+            display: flex;
+            gap: 8px;
+            padding: 8px;
+            justify-content: center;
+            border-top: 1px solid #30363d;
+            background: #1c2129;
+        }
+        .media-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 1px solid #30363d;
+            background: #21262d;
+            color: #c9d1d9;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+        .media-btn:hover { background: #30363d; }
+        .media-btn.active {
+            background: #6e1a1a;
+            border-color: #f85149;
+            color: #f85149;
+            animation: mic-pulse 1.5s infinite;
+        }
+        .media-btn svg { width: 20px; height: 20px; }
+
         /* Video Panel */
-        #videoPanel { grid-column: 1; grid-row: 1; }
+        #videoPanel { }
         #localVideo {
             width: 100%;
             height: 100%;
@@ -112,7 +150,7 @@
         .video-placeholder svg { width: 48px; height: 48px; opacity: 0.5; }
 
         /* Diagram Panel */
-        #diagramPanel { grid-column: 2; grid-row: 1; }
+        #diagramPanel { }
         #mermaidOutput {
             display: flex;
             align-items: center;
@@ -135,7 +173,7 @@
         }
 
         /* Chat / Live Transcript Panel */
-        #chatPanel { grid-column: 1; grid-row: 2; }
+        #chatPanel { }
         .messages {
             display: flex;
             flex-direction: column;
@@ -194,8 +232,7 @@
         .input-row input:focus { border-color: #58a6ff; }
         .input-row input::placeholder { color: #484f58; }
 
-        /* Validation / Report Panel */
-        #validationPanel { grid-column: 2; grid-row: 2; }
+        /* Validation content (now inside diagram panel as a tab) */
         .report-content {
             font-family: 'SFMono-Regular', monospace;
             font-size: 13px;
@@ -231,17 +268,6 @@
             color: #fff;
         }
         .btn-blue:hover { background: #388bfd; }
-        .btn-mic {
-            background: #21262d;
-            border-color: #30363d;
-            color: #c9d1d9;
-        }
-        .btn-mic.active {
-            background: #6e1a1a;
-            border-color: #f85149;
-            color: #f85149;
-            animation: mic-pulse 1.5s infinite;
-        }
         @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.4); } 50% { box-shadow: 0 0 0 6px rgba(248,81,73,0); } }
         .btn-sm { padding: 4px 10px; font-size: 12px; }
         .btn-group { display: flex; gap: 6px; }
@@ -284,6 +310,125 @@
         }
         .tab-content { display: none; height: 100%; }
         .tab-content.active { display: flex; flex-direction: column; }
+
+        /* Post-session overlay */
+        .session-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .session-overlay.visible {
+            display: flex;
+        }
+        .overlay-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 32px;
+            min-width: 380px;
+            max-width: 440px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+        }
+        .overlay-card h2 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #e1e4e8;
+            text-align: center;
+        }
+        .overlay-card p {
+            font-size: 13px;
+            color: #8b949e;
+            text-align: center;
+        }
+        .overlay-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .overlay-btn {
+            padding: 12px 20px;
+            border-radius: 10px;
+            border: 1px solid #30363d;
+            background: #21262d;
+            color: #e1e4e8;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .overlay-btn:hover { background: #30363d; }
+        .overlay-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+        .overlay-btn-primary {
+            background: #238636;
+            border-color: #2ea043;
+            color: #fff;
+        }
+        .overlay-btn-primary:hover { background: #2ea043; }
+        .demo-sub-options {
+            display: none;
+            gap: 8px;
+            padding-left: 30px;
+        }
+        .demo-sub-options.visible {
+            display: flex;
+        }
+        .demo-sub-btn {
+            flex: 1;
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            background: #1c2129;
+            color: #c9d1d9;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        .demo-sub-btn:hover { background: #30363d; }
+        .overlay-close {
+            padding: 10px 20px;
+            border-radius: 10px;
+            border: 1px solid #30363d;
+            background: transparent;
+            color: #8b949e;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        .overlay-close:hover { background: #21262d; color: #e1e4e8; }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: #1c2129;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 12px 20px;
+            color: #e1e4e8;
+            font-size: 13px;
+            z-index: 200;
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+        }
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
     </style>
 </head>
 <body>
@@ -293,9 +438,7 @@
             <span>Collaborative Brainstorming Intelligence</span>
         </div>
         <div class="btn-group">
-            <button class="btn" id="btnCamera" onclick="toggleCamera()">Start Camera</button>
-            <button class="btn btn-mic" id="btnMic" onclick="toggleMic()">Start Mic</button>
-            <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Connect Live</button>
+            <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Start Session</button>
             <div class="status-badge disconnected" id="statusBadge">
                 <div class="status-dot"></div>
                 <span id="statusText">Disconnected</span>
@@ -304,96 +447,138 @@
     </header>
 
     <div class="main-grid">
-        <!-- Video Feed -->
-        <div class="panel" id="videoPanel">
-            <div class="panel-header">
-                <h2>Live Camera Feed</h2>
-                <div class="btn-group">
-                    <span id="micIndicator" style="display:none;font-size:12px;color:#f85149;font-weight:500;">MIC LIVE</span>
-                    <button class="btn btn-sm" onclick="captureFrame()">Capture Frame</button>
+        <!-- Left Column: Camera Feed + Session Notes -->
+        <div class="left-column">
+            <!-- Video Feed -->
+            <div class="panel" id="videoPanel">
+                <div class="panel-header">
+                    <h2>Live Camera Feed</h2>
+                    <div class="btn-group">
+                        <span id="micIndicator" style="display:none;font-size:12px;color:#f85149;font-weight:500;">MIC LIVE</span>
+                        <button class="btn btn-sm" onclick="captureFrame()">Capture Frame</button>
+                    </div>
+                </div>
+                <div class="panel-body" style="padding:8px;">
+                    <video id="localVideo" autoplay muted playsinline style="display:none;"></video>
+                    <canvas id="captureCanvas" style="display:none;"></canvas>
+                    <div class="video-placeholder" id="videoPlaceholder">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                        </svg>
+                        <span>Camera activates when session starts</span>
+                        <span style="font-size:12px;">Captures whiteboard sketches for diagram extraction</span>
+                    </div>
+                </div>
+                <!-- Camera & Mic icon buttons -->
+                <div class="media-controls">
+                    <button class="media-btn" id="btnCamera" onclick="toggleCamera()" title="Toggle Camera">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                        </svg>
+                    </button>
+                    <button class="media-btn" id="btnMic" onclick="toggleMic()" title="Toggle Microphone">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                        </svg>
+                    </button>
                 </div>
             </div>
-            <div class="panel-body" style="padding:8px;">
-                <video id="localVideo" autoplay muted playsinline style="display:none;"></video>
-                <canvas id="captureCanvas" style="display:none;"></canvas>
-                <div class="video-placeholder" id="videoPlaceholder">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                    </svg>
-                    <span>Click "Start Camera" to begin</span>
-                    <span style="font-size:12px;">Captures whiteboard sketches for diagram extraction</span>
+
+            <!-- Session Notes -->
+            <div class="panel" id="chatPanel">
+                <div class="panel-header">
+                    <h2>Session Notes</h2>
+                    <div class="tabs">
+                        <div class="tab active" onclick="switchTab('transcript')">Transcript</div>
+                        <div class="tab" onclick="switchTab('proxies')">Proxy Objects</div>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="tab-content active" id="tab-transcript">
+                        <div class="messages">
+                            <div class="msg-list" id="msgList">
+                                <div class="msg system">FUSE session started. Use voice commands or type below.</div>
+                            </div>
+                            <div class="input-row">
+                                <input type="text" id="cmdInput" placeholder='Try: "This stapler is our GPU cluster"' onkeydown="if(event.key==='Enter')sendCommand()">
+                                <button class="btn btn-primary" onclick="sendCommand()">Send</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-content" id="tab-proxies">
+                        <table class="proxy-table">
+                            <thead><tr><th>Object</th><th>Technical Role</th></tr></thead>
+                            <tbody id="proxyTableBody">
+                                <tr><td colspan="2" style="color:#484f58;text-align:center;padding:24px;">No proxy objects registered yet</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Diagram Output -->
+        <!-- Right Column: Architecture (Diagram + Validation toggle) -->
         <div class="panel" id="diagramPanel">
             <div class="panel-header">
-                <h2>Architecture Diagram</h2>
-                <div class="btn-group">
-                    <button class="btn btn-sm" onclick="fetchRenderedDiagram()">Render PNG</button>
-                    <button class="btn btn-sm" onclick="refreshMermaid()">Refresh</button>
+                <div class="tabs">
+                    <div class="tab active" onclick="switchArchTab('diagram')">Architecture Diagram</div>
+                    <div class="tab" onclick="switchArchTab('validation')">Validation</div>
                 </div>
+                <button class="btn btn-sm btn-blue" onclick="runValidation()">Validate Diagram</button>
             </div>
             <div class="panel-body" style="padding:8px;">
-                <div id="mermaidOutput">
-                    <div class="diagram-placeholder" id="diagramPlaceholder">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="#484f58">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
-                        </svg>
-                        <span>No diagram yet</span>
-                        <span style="font-size:12px;">Send a sketch or use "Imagine" mode to build one</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Chat / Live Transcript -->
-        <div class="panel" id="chatPanel">
-            <div class="panel-header">
-                <h2>Session</h2>
-                <div class="tabs">
-                    <div class="tab active" onclick="switchTab('transcript')">Transcript</div>
-                    <div class="tab" onclick="switchTab('proxies')">Proxy Objects</div>
-                </div>
-            </div>
-            <div class="panel-body">
-                <div class="tab-content active" id="tab-transcript">
-                    <div class="messages">
-                        <div class="msg-list" id="msgList">
-                            <div class="msg system">FUSE session started. Use voice commands or type below.</div>
-                        </div>
-                        <div class="input-row">
-                            <input type="text" id="cmdInput" placeholder='Try: "This stapler is our GPU cluster"' onkeydown="if(event.key==='Enter')sendCommand()">
-                            <button class="btn btn-primary" onclick="sendCommand()">Send</button>
+                <!-- Diagram view (default) -->
+                <div class="tab-content active" id="arch-diagram">
+                    <div id="mermaidOutput">
+                        <div class="diagram-placeholder" id="diagramPlaceholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="#484f58">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
+                            </svg>
+                            <span>No diagram yet</span>
+                            <span style="font-size:12px;">Diagram auto-generates as the conversation progresses</span>
                         </div>
                     </div>
                 </div>
-                <div class="tab-content" id="tab-proxies">
-                    <table class="proxy-table">
-                        <thead><tr><th>Object</th><th>Technical Role</th></tr></thead>
-                        <tbody id="proxyTableBody">
-                            <tr><td colspan="2" style="color:#484f58;text-align:center;padding:24px;">No proxy objects registered yet</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Validation Report -->
-        <div class="panel" id="validationPanel">
-            <div class="panel-header">
-                <h2>Architecture Validation</h2>
-                <button class="btn btn-sm btn-blue" onclick="runValidation()">Run Validation</button>
-            </div>
-            <div class="panel-body">
-                <div class="report-content" id="validationReport" style="color:#484f58;">
-Click "Run Validation" to analyze the current architecture for logical inconsistencies, bottlenecks, or single points of failure.
+                <!-- Validation view -->
+                <div class="tab-content" id="arch-validation">
+                    <div class="report-content" id="validationReport" style="color:#484f58;">
+Click "Validate Diagram" to analyze the current architecture for logical inconsistencies, bottlenecks, or single points of failure.
 
 Powered by Gemini 3.1 Pro Preview.</div>
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- Post-session overlay -->
+    <div class="session-overlay" id="sessionOverlay">
+        <div class="overlay-card">
+            <h2>Session Complete</h2>
+            <p>Your brainstorming session has ended. What would you like to do with the results?</p>
+            <div class="overlay-actions">
+                <button class="overlay-btn overlay-btn-primary" onclick="downloadDiagram()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                    Download Architecture Diagram
+                </button>
+                <button class="overlay-btn" onclick="toggleDemoOptions()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-2.625 0V5.625m0 0A1.125 1.125 0 014.5 4.5h15a1.125 1.125 0 011.125 1.125v12.75M18 19.5h1.125a1.125 1.125 0 001.125-1.125M18 19.5h-1.5c-.621 0-1.125-.504-1.125-1.125m3.75 0v-7.5A1.125 1.125 0 0018 9.75H6A1.125 1.125 0 004.875 10.875v7.5" />
+                    </svg>
+                    Generate Demo
+                </button>
+                <div class="demo-sub-options" id="demoSubOptions">
+                    <button class="demo-sub-btn" onclick="generateDemo('mockup')">Image (Mockup)</button>
+                    <button class="demo-sub-btn" onclick="generateDemo('animation')">Video (Animation)</button>
+                </div>
+            </div>
+            <button class="overlay-close" onclick="dismissOverlay()">Exit</button>
+        </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast" id="toast"></div>
 
     <script>
         mermaid.initialize({ startOnLoad: false, theme: 'dark' });
@@ -404,6 +589,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let cameraStream = null;
         let frameInterval = null;
         const proxyRegistry = {};
+        let sessionState = 'idle'; // idle | active | ended
 
         // --- Audio state ---
         let micActive = false;
@@ -428,9 +614,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
+                sessionState = 'active';
                 setStatus(true);
                 addMsg('system', 'Connected to Gemini Live API session.');
-                document.getElementById('btnConnect').textContent = 'Disconnect';
+                document.getElementById('btnConnect').textContent = 'End Session';
+                document.getElementById('btnConnect').style.background = '#da3633';
+                document.getElementById('btnConnect').style.borderColor = '#f85149';
+                // Auto-activate camera and mic on successful connection
+                if (!cameraStream) toggleCamera();
+                if (!micActive) toggleMic();
             };
 
             ws.onmessage = (event) => {
@@ -451,11 +643,22 @@ Powered by Gemini 3.1 Pro Preview.</div>
             };
 
             ws.onclose = () => {
+                const wasActive = sessionState === 'active';
                 setStatus(false);
                 addMsg('system', 'Disconnected from live session.');
-                document.getElementById('btnConnect').textContent = 'Connect Live';
-                // Stop mic if it was streaming
+                document.getElementById('btnConnect').textContent = 'Start Session';
+                document.getElementById('btnConnect').style.background = '';
+                document.getElementById('btnConnect').style.borderColor = '';
+                // Stop mic and camera
                 if (micActive) toggleMic();
+                if (cameraStream) toggleCamera();
+                // Show post-session overlay if session was active (not a failed connect)
+                if (wasActive) {
+                    sessionState = 'ended';
+                    showSessionOverlay();
+                } else {
+                    sessionState = 'idle';
+                }
             };
 
             ws.onerror = (e) => {
@@ -467,7 +670,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
             const badge = document.getElementById('statusBadge');
             const text = document.getElementById('statusText');
             badge.className = 'status-badge ' + (connected ? 'connected' : 'disconnected');
-            text.textContent = connected ? 'Live' : 'Disconnected';
+            text.textContent = connected ? 'Connected' : 'Disconnected';
         }
 
         // --- Microphone Capture (Web Audio API -> PCM16 @ 16kHz) ---
@@ -481,7 +684,6 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 if (micProcessor) { micProcessor.disconnect(); micProcessor = null; }
                 if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
                 if (audioContext) { audioContext.close(); audioContext = null; }
-                btn.textContent = 'Start Mic';
                 btn.classList.remove('active');
                 indicator.style.display = 'none';
                 addMsg('system', 'Microphone stopped.');
@@ -526,7 +728,6 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 micProcessor.connect(audioContext.destination);
 
                 micActive = true;
-                btn.textContent = 'Stop Mic';
                 btn.classList.add('active');
                 indicator.style.display = 'inline';
                 addMsg('system', 'Microphone active - speak your commands. Audio is streaming to Gemini Live.');
@@ -567,7 +768,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 cameraStream = null;
                 video.style.display = 'none';
                 placeholder.style.display = 'flex';
-                btn.textContent = 'Start Camera';
+                btn.classList.remove('active');
                 if (frameInterval) clearInterval(frameInterval);
                 return;
             }
@@ -577,7 +778,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 video.srcObject = cameraStream;
                 video.style.display = 'block';
                 placeholder.style.display = 'none';
-                btn.textContent = 'Stop Camera';
+                btn.classList.add('active');
 
                 // Auto-stream frames if WebSocket is connected
                 frameInterval = setInterval(() => {
@@ -755,10 +956,19 @@ Powered by Gemini 3.1 Pro Preview.</div>
         }
 
         function switchTab(name) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            const panel = document.getElementById('chatPanel');
+            panel.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            panel.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
             document.getElementById('tab-' + name).classList.add('active');
+        }
+
+        function switchArchTab(name) {
+            const panel = document.getElementById('diagramPanel');
+            panel.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            panel.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('arch-' + name).classList.add('active');
         }
 
         function updateProxyTable() {
@@ -771,6 +981,73 @@ Powered by Gemini 3.1 Pro Preview.</div>
             tbody.innerHTML = entries.map(([obj, role]) =>
                 `<tr><td>${obj}</td><td>${role}</td></tr>`
             ).join('');
+        }
+
+        // --- Session Overlay ---
+        function showSessionOverlay() {
+            document.getElementById('demoSubOptions').classList.remove('visible');
+            document.getElementById('sessionOverlay').classList.add('visible');
+        }
+
+        function dismissOverlay() {
+            document.getElementById('sessionOverlay').classList.remove('visible');
+            sessionState = 'idle';
+        }
+
+        async function downloadDiagram() {
+            try {
+                // Try PNG render first
+                const resp = await fetch(BASE + '/render');
+                if (resp.headers.get('content-type')?.includes('image/png')) {
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'fuse-architecture-diagram.png';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    showToast('Diagram downloaded');
+                } else {
+                    // Fallback: export the SVG from mermaid output
+                    const svg = document.querySelector('#mermaidOutput svg');
+                    if (svg) {
+                        const svgData = new XMLSerializer().serializeToString(svg);
+                        const blob = new Blob([svgData], { type: 'image/svg+xml' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'fuse-architecture-diagram.svg';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        showToast('Diagram downloaded as SVG');
+                    } else {
+                        showToast('No diagram available to download');
+                    }
+                }
+            } catch (e) {
+                showToast('Download failed: ' + e.message);
+            }
+        }
+
+        function toggleDemoOptions() {
+            document.getElementById('demoSubOptions').classList.toggle('visible');
+        }
+
+        function generateDemo(type) {
+            const label = type === 'mockup' ? 'Image (Mockup)' : 'Video (Animation)';
+            showToast(label + ' generation coming soon — Imagen/Veo3 integration pending');
+        }
+
+        // --- Toast ---
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('visible');
+            setTimeout(() => toast.classList.remove('visible'), 3000);
         }
     </script>
 </body>
