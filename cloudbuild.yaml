@@ -43,3 +43,6 @@ steps:
 images:
   - 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:${SHORT_SHA}'
   - 'us-central1-docker.pkg.dev/${PROJECT_ID}/fuse-repo/fuse-service:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
