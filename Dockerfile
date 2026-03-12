@@ -47,6 +47,9 @@ COPY . .
 # Create puppeteer config for mermaid-cli
 RUN echo '{"args": ["--no-sandbox", "--disable-setuid-sandbox"]}' > /app/puppeteer-config.json
 
+# Create output directories for generated media
+RUN mkdir -p output/visualizations output/animations output/diagrams
+
 # Expose the port Cloud Run expects (default is 8080)
 EXPOSE 8080
 

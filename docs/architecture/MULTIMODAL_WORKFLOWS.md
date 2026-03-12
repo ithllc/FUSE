@@ -132,3 +132,52 @@ sequenceDiagram
     MCLI-->>Server: latest_architecture.png
     Server-->>User: Binary Image Response (image/png)
 ```
+
+## 6. Photorealistic Visualization Pipeline (Imagen + Veo 3)
+
+This workflow transforms Mermaid diagrams into photorealistic images and animated videos.
+
+```mermaid
+sequenceDiagram
+    participant User as Web Browser / Client
+    participant Server as FastAPI
+    participant Redis as Session State Manager
+    participant MST as MermaidSceneTranslator
+    participant Imagen as Imagen 4.0
+    participant Veo3 as Veo 3.0
+
+    User->>Server: GET /render/realistic
+    Server->>Redis: get_architectural_state()
+    Redis-->>Server: mermaid_code
+    Server->>MST: translate(mermaid_code)
+    MST-->>Server: Scene description (natural language)
+    Server->>Imagen: generate_images(scene_prompt)
+    Imagen-->>Server: PNG image bytes
+    Server-->>User: Binary Image Response (image/png)
+
+    User->>Server: GET /render/animate
+    Server->>Imagen: generate (if not cached)
+    Imagen-->>Server: PNG image bytes
+    Server->>Veo3: generate_videos(image + animation_prompt)
+    Note over Server,Veo3: Async polling every 5s (up to 3 min)
+    Veo3-->>Server: MP4 video bytes
+    Server-->>User: Binary Video Response (video/mp4)
+```
+
+### Scene Translation Pipeline
+
+The `MermaidSceneTranslator` converts Mermaid syntax into visual scene descriptions:
+
+1. **Parse nodes**: Extract node IDs and labels using regex patterns
+2. **Parse edges**: Extract connections with edge types (-->, ---, -.->)
+3. **Parse subgraphs**: Extract zone groupings
+4. **Map to visuals**: Match each node label against a visual metaphor dictionary (70+ mappings)
+5. **Build scene**: Compose a natural-language description of the entire infrastructure
+
+### Caching
+
+| Layer | TTL | Key |
+|-------|-----|-----|
+| Imagen in-memory | 5 min | SHA-256 of Mermaid code |
+| Veo 3 in-memory | 10 min | SHA-256 of image bytes |
+| Disk persistence | Until cleanup | `output/visualizations/`, `output/animations/` |

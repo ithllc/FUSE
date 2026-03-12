@@ -165,6 +165,18 @@ When you capture a whiteboard frame or describe architecture verbally, FUSE extr
 |--------|--------|
 | **Refresh** | Fetches the latest Mermaid state from the server |
 | **Render PNG** | Generates a server-side PNG using Mermaid CLI |
+| **Visualize** | Generates a photorealistic image using Imagen 4.0 (10-30s) |
+| **Animate** | Generates an animated walkthrough video using Veo 3.0 (30-120s) |
+
+### Photorealistic Visualization (Imagen + Veo 3)
+
+FUSE can transform your Mermaid architecture diagrams into photorealistic images and animated videos:
+
+1. Click **"Visualize"** in the diagram panel header to generate a photorealistic CGI render of your architecture using Imagen 4.0
+2. Click **"Animate"** to create a short cinematic walkthrough video using Veo 3.0 with data-flow effects
+3. The realistic view panel shows the generated image/video with a toggle back to the standard diagram
+
+These features are also accessible from the post-session overlay via **"Generate Demo"** > **"Image (Mockup)"** or **"Video (Animation)"**.
 
 ### API Endpoints for Diagrams
 
@@ -174,6 +186,15 @@ curl http://localhost:8080/state/mermaid
 
 # Render to PNG (returns image file)
 curl http://localhost:8080/render --output diagram.png
+
+# Generate photorealistic image (returns PNG)
+curl http://localhost:8080/render/realistic --output realistic.png
+
+# Generate animated walkthrough (returns MP4)
+curl http://localhost:8080/render/animate --output walkthrough.mp4
+
+# Full pipeline: image + video (returns JSON with base64)
+curl http://localhost:8080/render/visualize
 ```
 
 ---

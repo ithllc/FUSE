@@ -25,6 +25,9 @@ graph TD
         VP --> S1
         S1 -- Periodic --> P1[ProofOrchestrator]
         S1 -- GET /render --> R1[DiagramRenderer]
+        S1 -- GET /render/realistic --> IM[ImagenDiagramVisualizer]
+        IM --> MST[MermaidSceneTranslator]
+        IM -- GET /render/animate --> VEO[Veo3DiagramAnimator]
     end
 
     subgraph Google Vertex AI
@@ -32,6 +35,8 @@ graph TD
         SC <--> G2[Gemini 3.1 Flash Lite Preview]
         VP <--> G2
         P1 <--> G3[Gemini 3.1 Pro Preview]
+        IM <--> G4[Imagen 4.0]
+        VEO <--> G5[Veo 3.0]
     end
 
     subgraph State Store
@@ -50,6 +55,9 @@ graph TD
 | **ProofOrchestrator** | High-fidelity architectural reasoning and validation. | `gemini-3.1-pro-preview` |
 | **SessionStateManager** | Low-latency state persistence, event logging, vision mode, proxy registry, and transcript retrieval. | Google Cloud Memory Store (Redis) |
 | **DiagramRenderer** | Automated PNG generation for session output. | Mermaid CLI (`mmdc`) |
+| **ImagenDiagramVisualizer** | Generates photorealistic images from Mermaid diagrams via scene description translation. | `imagen-4.0-generate-001` |
+| **MermaidSceneTranslator** | Parses Mermaid AST and converts nodes/edges into natural-language visual scene descriptions. | Prompt templates |
+| **Veo3DiagramAnimator** | Animates photorealistic architecture images into short walkthrough videos. | `veo-3.0-generate-preview` |
 
 ## 3. Vision Pipeline Detail
 
@@ -81,3 +89,6 @@ The vision system uses a **two-pass architecture** to focus on relevant content:
 *   **REST API (`/state/mermaid`)**: Returns the current Mermaid.js architectural state from Redis.
 *   **REST API (`/validate`)**: Triggers on-demand architecture validation via ProofOrchestrator.
 *   **REST API (`/command`)**: Accepts text commands for proxy assignment and vision mode switching.
+*   **REST API (`/render/realistic`)**: Generates a photorealistic image from the current Mermaid state using Imagen 4.0. Returns PNG bytes.
+*   **REST API (`/render/animate`)**: Generates an animated walkthrough video from the realistic image using Veo 3.0. Returns MP4 bytes.
+*   **REST API (`/render/visualize`)**: Full pipeline (Mermaid -> image -> video). Returns JSON with base64-encoded image and video.

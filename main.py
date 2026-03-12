@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import os
 import json
@@ -7,7 +8,7 @@ import traceback
 from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -20,6 +21,8 @@ from src.audio.gemini_live_stream_handler import GeminiLiveStreamHandler
 from src.state.session_state_manager import SessionStateManager
 from src.agents.proof_orchestrator import ProofOrchestrator
 from src.output.diagram_renderer import DiagramRenderer
+from src.output.imagen_diagram_visualizer import ImagenDiagramVisualizer
+from src.output.veo3_diagram_animator import Veo3DiagramAnimator
 
 # Load environment variables
 load_dotenv()
@@ -34,6 +37,8 @@ diagram_renderer = None
 state_manager = None
 vision_capture = None
 proof_orchestrator = None
+imagen_visualizer = None
+veo3_animator = None
 
 # Frame processing debounce (Phase 4)
 _processing_frame = False
@@ -203,6 +208,80 @@ async def render_diagram():
 
     return {"status": "error", "message": "Failed to render diagram."}
 
+@app.get("/render/realistic")
+async def render_realistic():
+    """Generate a photorealistic image of the current architecture using Imagen."""
+    if not state_manager or not imagen_visualizer:
+        return {"status": "error", "message": "System components not initialized."}
+
+    mermaid_code = state_manager.get_architectural_state()
+    if not mermaid_code:
+        return {"status": "error", "message": "No architectural state to visualize."}
+
+    image_bytes = await imagen_visualizer.generate(mermaid_code)
+    if image_bytes:
+        return Response(content=image_bytes, media_type="image/png")
+
+    return {"status": "error", "message": "Failed to generate realistic visualization."}
+
+@app.get("/render/animate")
+async def render_animate():
+    """Generate an animated walkthrough video from the realistic image using Veo 3."""
+    if not state_manager or not imagen_visualizer or not veo3_animator:
+        return {"status": "error", "message": "System components not initialized."}
+
+    mermaid_code = state_manager.get_architectural_state()
+    if not mermaid_code:
+        return {"status": "error", "message": "No architectural state to animate."}
+
+    # Ensure a realistic image exists (generate if needed)
+    image_bytes = await imagen_visualizer.generate(mermaid_code)
+    if not image_bytes:
+        return {"status": "error", "message": "Failed to generate base image for animation."}
+
+    video_bytes = await veo3_animator.animate(
+        image_bytes=image_bytes,
+        mermaid_code=mermaid_code,
+        duration_seconds=6,
+    )
+    if video_bytes:
+        return Response(content=video_bytes, media_type="video/mp4")
+
+    return {"status": "error", "message": "Failed to generate animation."}
+
+@app.get("/render/visualize")
+async def render_visualize():
+    """Full pipeline: Mermaid -> photorealistic image -> animated video.
+    Returns JSON with base64-encoded image and video."""
+    if not state_manager or not imagen_visualizer or not veo3_animator:
+        return {"status": "error", "message": "System components not initialized."}
+
+    mermaid_code = state_manager.get_architectural_state()
+    if not mermaid_code:
+        return {"status": "error", "message": "No architectural state to visualize."}
+
+    result = {"status": "success", "image": None, "video": None}
+
+    image_bytes = await imagen_visualizer.generate(mermaid_code)
+    if image_bytes:
+        result["image"] = base64.b64encode(image_bytes).decode("utf-8")
+        result["image_mime"] = "image/png"
+    else:
+        return {"status": "error", "message": "Image generation failed."}
+
+    video_bytes = await veo3_animator.animate(
+        image_bytes=image_bytes,
+        mermaid_code=mermaid_code,
+        duration_seconds=6,
+    )
+    if video_bytes:
+        result["video"] = base64.b64encode(video_bytes).decode("utf-8")
+        result["video_mime"] = "video/mp4"
+    else:
+        result["video_error"] = "Animation generation failed; image is still available."
+
+    return result
+
 @app.get("/state/mermaid")
 async def get_mermaid_state():
     """Returns the current Mermaid.js architectural state from Redis."""
@@ -250,7 +329,7 @@ async def run_periodic_validation(interval_seconds: int = 60):
 
 
 async def start_agents():
-    global live_handler, diagram_renderer, state_manager, vision_capture, proof_orchestrator
+    global live_handler, diagram_renderer, state_manager, vision_capture, proof_orchestrator, imagen_visualizer, veo3_animator
     print(f"--- Initializing FUSE: The Collaborative Brainstorming Intelligence (Project: {PROJECT_ID}) ---")
 
     # 1. Initialize State Manager (Redis)
@@ -272,6 +351,18 @@ async def start_agents():
     # 5. Initialize Diagram Renderer (Mermaid CLI)
     diagram_renderer = DiagramRenderer()
     print("  Diagram Renderer (Mermaid CLI) initialized.")
+
+    # 6. Initialize Imagen Diagram Visualizer (imagen-4.0-generate-001)
+    imagen_visualizer = ImagenDiagramVisualizer(
+        project_id=PROJECT_ID, location=LOCATION, state_manager=state_manager
+    )
+    print("  Imagen Diagram Visualizer (imagen-4.0-generate-001) initialized.")
+
+    # 7. Initialize Veo 3 Diagram Animator (veo-3.0-generate-preview)
+    veo3_animator = Veo3DiagramAnimator(
+        project_id=PROJECT_ID, location=LOCATION, state_manager=state_manager
+    )
+    print("  Veo3 Diagram Animator (veo-3.0-generate-preview) initialized.")
 
     print("\n--- System Ready ---")
 

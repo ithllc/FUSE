@@ -1,5 +1,7 @@
 # Imagen + Veo 3 Diagram Visualization Feature
 
+**Status**: Implemented
+
 ## 1. Feature Overview
 
 This feature extends FUSE's diagram rendering pipeline to produce photorealistic visualizations and short animated videos from Mermaid.js architecture diagrams. The pipeline has three stages:

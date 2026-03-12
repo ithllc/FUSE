@@ -269,6 +269,15 @@
         }
         .btn-blue:hover { background: #388bfd; }
         @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.4); } 50% { box-shadow: 0 0 0 6px rgba(248,81,73,0); } }
+        .spinner {
+            width: 32px; height: 32px;
+            border: 3px solid #30363d;
+            border-top: 3px solid #58a6ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .btn-sm { padding: 4px 10px; font-size: 12px; }
         .btn-group { display: flex; gap: 6px; }
 
@@ -530,7 +539,11 @@
                     <div class="tab active" onclick="switchArchTab('diagram')">Architecture Diagram</div>
                     <div class="tab" onclick="switchArchTab('validation')">Validation</div>
                 </div>
-                <button class="btn btn-sm btn-blue" onclick="runValidation()">Validate Diagram</button>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-blue" id="btnVisualize" onclick="generateRealistic()">Visualize</button>
+                    <button class="btn btn-sm btn-blue" id="btnAnimate" onclick="generateAnimation()">Animate</button>
+                    <button class="btn btn-sm btn-blue" onclick="runValidation()">Validate</button>
+                </div>
             </div>
             <div class="panel-body" style="padding:8px;">
                 <!-- Diagram view (default) -->
@@ -542,6 +555,19 @@
                             </svg>
                             <span>No diagram yet</span>
                             <span style="font-size:12px;">Diagram auto-generates as the conversation progresses</span>
+                        </div>
+                    </div>
+                    <!-- Realistic visualization output -->
+                    <div id="realisticOutput" style="display:none;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-size:12px; color:#8b949e; font-weight:500;">REALISTIC VIEW</span>
+                            <button class="btn btn-sm" onclick="toggleDiagramView()">Show Diagram</button>
+                        </div>
+                        <img id="realisticImage" style="max-width:100%; border-radius:8px; display:none;" />
+                        <video id="realisticVideo" controls style="max-width:100%; border-radius:8px; display:none;"></video>
+                        <div id="genProgress" style="display:none; text-align:center; padding:32px; color:#8b949e;">
+                            <div class="spinner"></div>
+                            <span id="genProgressText">Generating...</span>
                         </div>
                     </div>
                 </div>
@@ -1046,8 +1072,95 @@ Powered by Gemini 3.1 Pro Preview.</div>
         }
 
         function generateDemo(type) {
-            const label = type === 'mockup' ? 'Image (Mockup)' : 'Video (Animation)';
-            showToast(label + ' generation coming soon — Imagen/Veo3 integration pending');
+            dismissOverlay();
+            if (type === 'mockup') {
+                generateRealistic();
+            } else if (type === 'animation') {
+                generateAnimation();
+            }
+        }
+
+        // --- Imagen / Veo3 Visualization ---
+        let currentView = 'diagram'; // 'diagram' | 'realistic'
+
+        function toggleDiagramView() {
+            if (currentView === 'diagram') {
+                document.getElementById('mermaidOutput').style.display = 'none';
+                document.getElementById('realisticOutput').style.display = 'block';
+                currentView = 'realistic';
+            } else {
+                document.getElementById('mermaidOutput').style.display = 'flex';
+                document.getElementById('realisticOutput').style.display = 'none';
+                currentView = 'diagram';
+            }
+        }
+
+        function showGenProgress(text) {
+            const el = document.getElementById('genProgress');
+            document.getElementById('genProgressText').textContent = text;
+            el.style.display = 'block';
+            document.getElementById('realisticImage').style.display = 'none';
+            document.getElementById('realisticVideo').style.display = 'none';
+            document.getElementById('mermaidOutput').style.display = 'none';
+            document.getElementById('realisticOutput').style.display = 'block';
+            currentView = 'realistic';
+        }
+
+        function hideGenProgress() {
+            document.getElementById('genProgress').style.display = 'none';
+        }
+
+        async function generateRealistic() {
+            showGenProgress('Generating photorealistic image with Imagen (10-30s)...');
+            addMsg('system', 'Generating photorealistic visualization...');
+            try {
+                const resp = await fetch(BASE + '/render/realistic');
+                if (resp.headers.get('content-type')?.includes('image/png')) {
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const img = document.getElementById('realisticImage');
+                    img.src = url;
+                    img.style.display = 'block';
+                    hideGenProgress();
+                    addMsg('system', 'Realistic visualization generated.');
+                } else {
+                    const data = await resp.json();
+                    hideGenProgress();
+                    addMsg('system', 'Visualization error: ' + (data.message || 'Unknown error.'));
+                    toggleDiagramView();
+                }
+            } catch (e) {
+                hideGenProgress();
+                addMsg('system', 'Visualization failed: ' + e.message);
+                toggleDiagramView();
+            }
+        }
+
+        async function generateAnimation() {
+            showGenProgress('Generating animated walkthrough with Veo 3 (30-120s)...');
+            addMsg('system', 'Generating animated walkthrough...');
+            try {
+                const resp = await fetch(BASE + '/render/animate');
+                if (resp.headers.get('content-type')?.includes('video/mp4')) {
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const video = document.getElementById('realisticVideo');
+                    video.src = url;
+                    video.style.display = 'block';
+                    document.getElementById('realisticImage').style.display = 'none';
+                    hideGenProgress();
+                    addMsg('system', 'Animated walkthrough generated.');
+                } else {
+                    const data = await resp.json();
+                    hideGenProgress();
+                    addMsg('system', 'Animation error: ' + (data.message || 'Unknown error.'));
+                    toggleDiagramView();
+                }
+            } catch (e) {
+                hideGenProgress();
+                addMsg('system', 'Animation failed: ' + e.message);
+                toggleDiagramView();
+            }
         }
 
         // --- Vision Mode ---

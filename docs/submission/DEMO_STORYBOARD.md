@@ -167,14 +167,15 @@ This is the longest and most critical segment. It demonstrates the 40% Innovatio
 **On screen**: Click "End Session". Post-session overlay appears.
 
 **Narration**:
-> "When the session ends, FUSE presents your outputs. Download the architecture diagram as a PNG. Or generate a demo — we're integrating Imagen for photorealistic renders and Veo3 for animated walkthroughs."
+> "When the session ends, FUSE presents your outputs. Download the architecture diagram as a PNG, or generate a photorealistic visualization using Imagen and an animated walkthrough using Veo 3."
 
 **Checklist**:
 - [ ] Click "End Session"
 - [ ] Show overlay with all three CTAs
 - [ ] Click "Download Architecture Diagram" — show download
-- [ ] Click "Generate Demo" — show Image/Video sub-options
-- [ ] Mention Imagen/Veo3 as the roadmap
+- [ ] Click "Generate Demo" > "Image (Mockup)" — show Imagen generating a photorealistic scene
+- [ ] Click "Generate Demo" > "Video (Animation)" — show Veo 3 animated walkthrough
+- [ ] Show the realistic view with image and video playback controls
 
 ---
 
