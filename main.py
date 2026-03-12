@@ -4,6 +4,7 @@ import os
 import json
 import sys
 import traceback
+from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
@@ -34,6 +35,9 @@ state_manager = None
 vision_capture = None
 proof_orchestrator = None
 
+# Frame processing debounce (Phase 4)
+_processing_frame = False
+
 # Initialize FastAPI app
 app = FastAPI(title="FUSE: Collaborative Brainstorming Intelligence API")
 
@@ -58,17 +62,50 @@ async def trigger_command(text: str):
     return {"status": "success", "response": response}
 
 @app.post("/vision/frame")
-async def receive_frame(request: Request):
-    """Receives a binary image frame from the client-side streamer."""
+async def receive_frame(request: Request, mode: Optional[str] = None):
+    """Receives a binary image frame. Optional ?mode=whiteboard|imagine|charades override."""
+    global _processing_frame
+
     if not vision_capture:
         return {"status": "error", "message": "Vision capture not initialized."}
+
+    # Frame debounce: skip if previous frame still processing
+    if _processing_frame:
+        return {"status": "skipped", "reason": "Previous frame still processing"}
 
     frame_bytes = await request.body()
     if not frame_bytes:
         return {"status": "error", "message": "No frame data received."}
 
-    mermaid_code = vision_capture.process_received_frame(frame_bytes)
-    return {"status": "success", "mermaid_length": len(mermaid_code)}
+    # Apply mode override if provided
+    if mode and mode in ("whiteboard", "imagine", "charades") and state_manager:
+        state_manager.set_vision_mode(mode)
+
+    _processing_frame = True
+    try:
+        mermaid_code = vision_capture.process_received_frame(frame_bytes)
+        return {"status": "success", "mermaid_length": len(mermaid_code)}
+    finally:
+        _processing_frame = False
+
+@app.get("/vision/mode")
+async def get_vision_mode():
+    """Returns the current vision processing mode."""
+    if not state_manager:
+        return {"status": "error", "message": "State manager not initialized."}
+    return {"status": "ok", "mode": state_manager.get_vision_mode()}
+
+@app.post("/vision/mode")
+async def set_vision_mode(request: Request):
+    """Sets the vision processing mode: auto|whiteboard|imagine|charades."""
+    if not state_manager:
+        return {"status": "error", "message": "State manager not initialized."}
+    body = await request.json()
+    mode = body.get("mode", "auto")
+    if mode not in ("auto", "whiteboard", "imagine", "charades"):
+        return {"status": "error", "message": f"Invalid mode: {mode}"}
+    state_manager.set_vision_mode(mode)
+    return {"status": "ok", "mode": mode}
 
 @app.websocket("/live")
 async def websocket_endpoint(websocket: WebSocket):
@@ -106,6 +143,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 text_val = parsed.get("text", raw) if isinstance(parsed, dict) else raw
                             except (json.JSONDecodeError, TypeError):
                                 text_val = raw
+                            # Log user text for vision context injection (Phase 3)
+                            if state_manager:
+                                state_manager.log_event("voice_input", {"text": text_val})
                             await session.send(input=text_val, end_of_turn=True)
                 except WebSocketDisconnect:
                     logger.info("Client disconnected from WebSocket.")
@@ -122,6 +162,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 for part in sc.model_turn.parts:
                                     if hasattr(part, 'text') and part.text:
                                         await websocket.send_text(json.dumps({"text": part.text}))
+                                        # Log model responses for vision context injection (Phase 3)
+                                        if state_manager:
+                                            state_manager.log_event("voice_input", {"text": part.text})
                                     if hasattr(part, 'inline_data') and part.inline_data:
                                         await websocket.send_bytes(part.inline_data.data)
                         # Handle direct text/data attributes
@@ -218,9 +261,9 @@ async def start_agents():
     proof_orchestrator = ProofOrchestrator(project_id=PROJECT_ID, location=LOCATION)
     print("  Proof Orchestrator (gemini-3.1-pro-preview) initialized.")
 
-    # 3. Initialize Vision Capture (gemini-3.1-flash-lite-preview)
+    # 3. Initialize Vision Capture (gemini-3.1-flash-lite-preview) with two-pass pipeline
     vision_capture = VisionStateCapture(project_id=PROJECT_ID, state_manager=state_manager, location=LOCATION)
-    print("  Vision State Capture (gemini-3.1-flash-lite-preview) initialized.")
+    print("  Vision State Capture (two-pass pipeline, gemini-3.1-flash-lite-preview) initialized.")
 
     # 4. Initialize Live Stream Handler (gemini-2.5-flash-native-audio-preview)
     live_handler = GeminiLiveStreamHandler(project_id=PROJECT_ID, state_manager=state_manager, location=LOCATION)

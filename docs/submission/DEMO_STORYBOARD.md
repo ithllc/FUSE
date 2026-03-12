@@ -96,17 +96,19 @@ This is the longest and most critical segment. It demonstrates the 40% Innovatio
 - [ ] Show Proxy Objects tab updating in Session Notes
 - [ ] Show diagram updating based on object relationships
 
-#### Whiteboard Capture (1:55–2:10)
+#### Whiteboard Capture with Focal Point (1:55–2:10)
 
-**On screen**: Point camera at a hand-drawn whiteboard sketch. Show vision extraction.
+**On screen**: Point camera at a hand-drawn whiteboard sketch. Show vision mode selector set to "Auto Detect" or "Whiteboard". Show vision extraction.
 
 **Narration**:
-> "I've sketched a rough network topology on the whiteboard. Let me point the camera at it — FUSE's vision system will extract the structure and merge it into our diagram."
+> "I've sketched a rough network topology on the whiteboard. FUSE's two-pass vision system automatically detects the whiteboard, crops to just the drawing surface — ignoring me and the room — and extracts the structure into our diagram."
 
 **Checklist**:
 - [ ] Pre-draw a simple architecture sketch on a whiteboard
+- [ ] Show the Vision Mode dropdown in the camera panel (set to "Auto Detect")
 - [ ] Point camera at it, click "Capture Frame"
 - [ ] Show diagram updating with extracted structure
+- [ ] Optionally: switch to "Imagine (Objects)" mode to show mode switching in action
 
 #### Interruption Handling (2:10–2:20)
 

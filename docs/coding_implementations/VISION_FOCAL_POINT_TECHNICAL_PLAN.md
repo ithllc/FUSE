@@ -2,7 +2,7 @@
 
 **PRD Reference**: `docs/coding_implementations/VISION_FOCAL_POINT_PRD.md`
 **Date**: 2026-03-11
-**Status**: Draft
+**Status**: Implemented
 
 ---
 

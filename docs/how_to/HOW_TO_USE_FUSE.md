@@ -201,28 +201,62 @@ FUSE uses the Gemini 2.5 Flash Native Audio model for real-time bidirectional vo
 
 ## Vision & Whiteboard Capture
 
+FUSE uses a **two-pass vision pipeline** for intelligent scene understanding:
+
+1. **Pass 1 (Scene Classification)**: Classifies what the camera sees (whiteboard, objects, gesture, mixed, unclear) and returns a bounding box for the focal region
+2. **ROI Cropping**: Crops the frame to the region of interest if confidence is sufficient
+3. **Pass 2 (Mode-Specific Extraction)**: Uses a tailored prompt based on the scene type, injecting relevant session context (proxy registry, transcript, current diagram state)
+
+### Vision Modes
+
+Use the **Vision Mode** dropdown in the camera panel header to control how frames are processed:
+
+| Mode | Behavior |
+|------|----------|
+| **Auto Detect** (default) | Pass 1 classifies the scene automatically |
+| **Whiteboard** | Forces whiteboard extraction — ignores people and background |
+| **Imagine (Objects)** | Forces proxy object recognition — uses proxy registry context |
+| **Charades (Gestures)** | Forces gesture interpretation — uses voice transcript context |
+
+You can also switch modes via text commands: type "whiteboard mode", "imagine mode", "charades mode", or "auto mode" in the chat input.
+
 ### Automatic Frame Streaming
 
-When the camera is active, frames are sent to the server at 2 FPS automatically. FUSE's VisionStateCapture component analyzes each frame for:
-- Technical diagrams and sketches
-- Whiteboard drawings with nodes and relationships
-- Text labels and annotations
+When the camera is active, frames are sent to the server at 2 FPS automatically. Frames are debounced — if a previous frame is still being processed, new frames are skipped to prevent backlog.
 
 ### Manual Frame Capture
 
 Click **"Capture Frame"** to send a single high-quality frame for analysis. This triggers:
 1. JPEG frame sent to `POST /vision/frame`
-2. Gemini 3.1 Flash Lite extracts Mermaid.js code
-3. Diagram panel updates with the extracted architecture
-4. State is persisted to Redis
+2. Pass 1 classifies the scene and crops to ROI
+3. Pass 2 extracts architecture using mode-specific prompt
+4. Diagram panel updates with the extracted architecture
+5. State is persisted to Redis
 
-### API Endpoint
+### Incremental Updates
+
+The vision pipeline injects the current diagram state into every extraction prompt, instructing the model to update incrementally rather than regenerate from scratch. A merge heuristic prevents partial views from overwriting a complete diagram.
+
+### API Endpoints
 
 ```bash
-# Send a frame for analysis
+# Send a frame for analysis (auto mode)
 curl -X POST http://localhost:8080/vision/frame \
   -H "Content-Type: application/octet-stream" \
   --data-binary @frame.jpg
+
+# Send a frame with explicit mode override
+curl -X POST "http://localhost:8080/vision/frame?mode=whiteboard" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @frame.jpg
+
+# Get current vision mode
+curl http://localhost:8080/vision/mode
+
+# Set vision mode
+curl -X POST http://localhost:8080/vision/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "imagine"}'
 ```
 
 ---

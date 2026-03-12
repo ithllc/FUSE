@@ -6,6 +6,20 @@ from google.genai import types
 
 from src.state.session_state_manager import SessionStateManager
 
+
+# Voice command keywords for vision mode switching (Phase 4)
+MODE_KEYWORDS = {
+    "whiteboard mode": "whiteboard",
+    "sketch mode": "whiteboard",
+    "imagine mode": "imagine",
+    "object mode": "imagine",
+    "proxy mode": "imagine",
+    "charades mode": "charades",
+    "gesture mode": "charades",
+    "auto mode": "auto",
+}
+
+
 class GeminiLiveStreamHandler:
     """
     Interleaves audio transcripts with vision frame metadata using Gemini 3.1 Flash Live.
@@ -27,9 +41,7 @@ class GeminiLiveStreamHandler:
         self.model_id = "gemini-live-2.5-flash-native-audio"
 
     def get_config(self) -> types.LiveConnectConfig:
-        """
-        Returns the configuration for the Gemini 3.1 Flash Live session.
-        """
+        """Returns the configuration for the Gemini 3.1 Flash Live session."""
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             system_instruction=types.Content(
@@ -43,7 +55,9 @@ class GeminiLiveStreamHandler:
                             "acknowledge it and maintain context. "
                             "If you see a technical sketch, you'll help extract it into Mermaid.js. "
                             "Interrupt only if you detect a logical architecture violation or "
-                            "if the user asks for a validation check."
+                            "if the user asks for a validation check. "
+                            "When a user requests a mode switch (e.g., 'switch to whiteboard mode'), "
+                            "acknowledge the switch."
                         )
                     )
                 ]
@@ -51,9 +65,7 @@ class GeminiLiveStreamHandler:
         )
 
     async def start_session(self):
-        """
-        Starts a multimodal live session.
-        """
+        """Starts a multimodal live session."""
         try:
             async with self.client.aio.live.connect(
                 model=self.model_id,
@@ -62,9 +74,6 @@ class GeminiLiveStreamHandler:
                 )
             ) as session:
                 print("Live session connected. Ready for gesture and voice commands.")
-                
-                # In a production environment, you would pipe audio/video frames here.
-                # For this implementation, we simulate the event loop.
                 while True:
                     await asyncio.sleep(1)
         except Exception as e:
@@ -72,33 +81,35 @@ class GeminiLiveStreamHandler:
 
     async def process_simulated_command(self, text: str):
         """
-        Simulates the detection of a voice command for proxy object assignment.
-        Example: 'This stapler is our GPU cluster'
+        Processes text commands for proxy object assignment and vision mode switching.
         """
         print(f"Processing command: {text}")
-        
-        # Simplified intent detection logic
-        if "is our" in text.lower() or "is a" in text.lower():
-            parts = text.lower().split(" is ")
+        text_lower = text.lower()
+
+        # Check for vision mode switch commands (Phase 4)
+        for phrase, mode in MODE_KEYWORDS.items():
+            if phrase in text_lower:
+                self.state_manager.set_vision_mode(mode)
+                self.state_manager.log_event("mode_switch", {"mode": mode})
+                return f"Switched to {mode} mode."
+
+        # Proxy object assignment
+        if "is our" in text_lower or "is a" in text_lower:
+            parts = text_lower.split(" is ")
             obj_name = parts[0].replace("this ", "").strip()
             role = parts[1].replace("our ", "").replace("a ", "").strip()
-            
+
             self.state_manager.set_object_proxy(obj_name, role)
             print(f"Proxy registered: {obj_name} -> {role}")
             self.state_manager.log_event("proxy_assignment", {"object": obj_name, "role": role})
             return f"Understood. {obj_name} is now the {role}."
-        
+
         return "Command not recognized."
 
     async def _handle_message(self, message):
-        """
-        Processes incoming multimodal messages from the live session.
-        """
-        # Logic for real-time spatial detection and intent mapping
-        # would interact with the session state here.
+        """Processes incoming multimodal messages from the live session."""
         pass
 
+
 if __name__ == "__main__":
-    # handler = GeminiLiveStreamHandler(project_id="fuse-489616")
-    # asyncio.run(handler.start_session())
     pass

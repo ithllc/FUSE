@@ -1,6 +1,8 @@
 import redis
 import json
+import time
 from typing import Dict, List, Any, Optional
+
 
 class SessionStateManager:
     """
@@ -16,38 +18,42 @@ class SessionStateManager:
         self.session_id = "fuse-session-latest"
 
     def set_object_proxy(self, object_id: str, technical_role: str):
-        """
-        Maps a visual object ID to a technical role (Proxy Object Registry).
-        """
+        """Maps a visual object ID to a technical role (Proxy Object Registry)."""
         key = f"{self.session_id}:proxy_registry"
         self.r.hset(key, object_id, technical_role)
 
     def get_object_proxy(self, object_id: str) -> Optional[str]:
-        """
-        Retrieves the technical role for a visual object.
-        """
+        """Retrieves the technical role for a visual object."""
         key = f"{self.session_id}:proxy_registry"
         return self.r.hget(key, object_id)
 
+    def get_proxy_registry(self) -> Dict[str, str]:
+        """Returns full proxy registry as {object_id: technical_role} dict."""
+        key = f"{self.session_id}:proxy_registry"
+        return self.r.hgetall(key) or {}
+
     def update_architectural_state(self, mermaid_code: str):
-        """
-        Saves the current Mermaid.js architectural model to Redis.
-        """
+        """Saves the current Mermaid.js architectural model to Redis."""
         key = f"{self.session_id}:architectural_state"
         self.r.set(key, mermaid_code)
 
     def get_architectural_state(self) -> Optional[str]:
-        """
-        Retrieves the latest architectural model.
-        """
+        """Retrieves the latest architectural model."""
         key = f"{self.session_id}:architectural_state"
         return self.r.get(key)
 
+    def get_vision_mode(self) -> str:
+        """Returns current vision mode: auto|whiteboard|imagine|charades. Default: auto."""
+        key = f"{self.session_id}:vision_mode"
+        return self.r.get(key) or "auto"
+
+    def set_vision_mode(self, mode: str):
+        """Sets the vision processing mode."""
+        key = f"{self.session_id}:vision_mode"
+        self.r.set(key, mode)
+
     def log_event(self, event_type: str, data: Dict[str, Any]):
-        """
-        Logs session events for multimodal history.
-        """
-        import time
+        """Logs session events for multimodal history."""
         key = f"{self.session_id}:events"
         self.r.lpush(key, json.dumps({
             "type": event_type,
@@ -56,16 +62,21 @@ class SessionStateManager:
         }))
 
     def get_events(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """
-        Retrieves the latest session events.
-        """
+        """Retrieves the latest session events."""
         key = f"{self.session_id}:events"
         raw_events = self.r.lrange(key, 0, limit - 1)
         return [json.loads(e) for e in raw_events]
 
+    def get_recent_transcript(self, limit: int = 5) -> str:
+        """Returns last N transcript events as a single string for context injection."""
+        events = self.get_events(limit=limit * 3)  # Over-fetch, filter to transcript types
+        transcript_events = [e for e in events if e.get("type") in ("voice_input", "proxy_assignment")]
+        lines = []
+        for e in transcript_events[:limit]:
+            payload = e.get("payload", {})
+            lines.append(payload.get("text", payload.get("role", str(payload))))
+        return "\n".join(lines) if lines else ""
+
+
 if __name__ == "__main__":
-    # In a local environment, you'd need a running Redis instance (e.g. docker run --name some-redis -d redis)
-    # sm = SessionStateManager()
-    # sm.set_object_proxy("stapler", "GPU cluster")
-    # print(sm.get_object_proxy("stapler"))
     pass

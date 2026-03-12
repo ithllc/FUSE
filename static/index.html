@@ -454,6 +454,12 @@
                 <div class="panel-header">
                     <h2>Live Camera Feed</h2>
                     <div class="btn-group">
+                        <select id="visionMode" onchange="setVisionMode(this.value)" style="background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;padding:4px 8px;cursor:pointer;">
+                            <option value="auto" selected>Auto Detect</option>
+                            <option value="whiteboard">Whiteboard</option>
+                            <option value="imagine">Imagine (Objects)</option>
+                            <option value="charades">Charades (Gestures)</option>
+                        </select>
                         <span id="micIndicator" style="display:none;font-size:12px;color:#f85149;font-weight:500;">MIC LIVE</span>
                         <button class="btn btn-sm" onclick="captureFrame()">Capture Frame</button>
                     </div>
@@ -620,6 +626,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 document.getElementById('btnConnect').textContent = 'End Session';
                 document.getElementById('btnConnect').style.background = '#da3633';
                 document.getElementById('btnConnect').style.borderColor = '#f85149';
+                // Sync vision mode selector with server state
+                fetchVisionMode();
                 // Auto-activate camera and mic on successful connection
                 if (!cameraStream) toggleCamera();
                 if (!micActive) toggleMic();
@@ -1040,6 +1048,31 @@ Powered by Gemini 3.1 Pro Preview.</div>
         function generateDemo(type) {
             const label = type === 'mockup' ? 'Image (Mockup)' : 'Video (Animation)';
             showToast(label + ' generation coming soon — Imagen/Veo3 integration pending');
+        }
+
+        // --- Vision Mode ---
+        async function setVisionMode(mode) {
+            try {
+                const resp = await fetch(BASE + '/vision/mode', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mode})
+                });
+                const data = await resp.json();
+                if (data.status === 'ok') showToast('Vision mode: ' + mode);
+            } catch (e) {
+                showToast('Failed to set vision mode');
+            }
+        }
+
+        async function fetchVisionMode() {
+            try {
+                const resp = await fetch(BASE + '/vision/mode');
+                const data = await resp.json();
+                if (data.status === 'ok' && data.mode) {
+                    document.getElementById('visionMode').value = data.mode;
+                }
+            } catch (e) { /* ignore */ }
         }
 
         // --- Toast ---
