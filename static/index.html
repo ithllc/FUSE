@@ -468,9 +468,179 @@
             opacity: 1;
             transform: translateX(-50%) translateY(0);
         }
+
+        /* --- Splash / Landing Page --- */
+        #splashOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: #0f1117;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.6s ease, visibility 0.6s ease;
+        }
+        #splashOverlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        .splash-brand {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+        .splash-brand h1 {
+            font-size: 64px;
+            font-weight: 800;
+            letter-spacing: -2px;
+            background: linear-gradient(135deg, #58a6ff, #bc8cff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .splash-brand .tagline {
+            font-size: 18px;
+            color: #8b949e;
+            font-weight: 400;
+        }
+        .splash-features {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            max-width: 860px;
+            margin-bottom: 56px;
+            padding: 0 24px;
+        }
+        .splash-feature {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px 18px;
+            text-align: center;
+            transition: border-color 0.3s ease, transform 0.3s ease;
+        }
+        .splash-feature:hover {
+            border-color: #58a6ff;
+            transform: translateY(-2px);
+        }
+        .splash-feature .feat-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+            display: block;
+        }
+        .splash-feature h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #c9d1d9;
+            margin-bottom: 6px;
+        }
+        .splash-feature p {
+            font-size: 12px;
+            color: #8b949e;
+            line-height: 1.5;
+        }
+        .splash-progress-area {
+            text-align: center;
+            width: 340px;
+        }
+        .splash-status {
+            font-size: 14px;
+            color: #8b949e;
+            margin-bottom: 14px;
+            min-height: 20px;
+        }
+        .splash-bar-track {
+            width: 100%;
+            height: 6px;
+            background: #21262d;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .splash-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #58a6ff, #bc8cff);
+            border-radius: 3px;
+            transition: width 0.3s linear;
+        }
+        .splash-countdown {
+            font-size: 13px;
+            color: #484f58;
+            margin-bottom: 20px;
+        }
+        #splashStartBtn {
+            display: none;
+            padding: 12px 36px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            background: linear-gradient(135deg, #238636, #2ea043);
+            border: 1px solid #3fb950;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        #splashStartBtn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(46,160,67,0.3);
+        }
+        .splash-powered {
+            position: absolute;
+            bottom: 24px;
+            font-size: 12px;
+            color: #484f58;
+        }
+        @media (max-width: 700px) {
+            .splash-features { grid-template-columns: repeat(2, 1fr); }
+            .splash-brand h1 { font-size: 42px; }
+        }
     </style>
 </head>
 <body>
+    <!-- Splash / Landing Page Overlay -->
+    <div id="splashOverlay">
+        <div class="splash-brand">
+            <h1>FUSE</h1>
+            <div class="tagline">Collaborative Brainstorming Intelligence</div>
+        </div>
+
+        <div class="splash-features">
+            <div class="splash-feature">
+                <span class="feat-icon">&#127908;</span>
+                <h3>Live Audio</h3>
+                <p>Real-time voice conversation powered by Gemini native audio</p>
+            </div>
+            <div class="splash-feature">
+                <span class="feat-icon">&#128247;</span>
+                <h3>Vision AI</h3>
+                <p>Camera captures whiteboards, objects, and gestures in real time</p>
+            </div>
+            <div class="splash-feature">
+                <span class="feat-icon">&#128202;</span>
+                <h3>Architecture Diagrams</h3>
+                <p>Auto-generated Mermaid diagrams from your brainstorming session</p>
+            </div>
+            <div class="splash-feature">
+                <span class="feat-icon">&#9889;</span>
+                <h3>Instant Validation</h3>
+                <p>AI-powered proof orchestration catches design flaws live</p>
+            </div>
+        </div>
+
+        <div class="splash-progress-area">
+            <div class="splash-status" id="splashStatus">Warming up services...</div>
+            <div class="splash-bar-track">
+                <div class="splash-bar-fill" id="splashBarFill"></div>
+            </div>
+            <div class="splash-countdown" id="splashCountdown">Starting in 15s</div>
+            <button id="splashStartBtn" onclick="dismissSplash()">Ready &mdash; Enter FUSE</button>
+        </div>
+
+        <div class="splash-powered">Powered by Gemini 2.5 Flash &middot; Vertex AI &middot; Cloud Run</div>
+    </div>
+
     <header>
         <div class="logo">
             <h1>FUSE</h1>
@@ -674,6 +844,68 @@ Powered by Gemini 3.1 Pro Preview.</div>
         mermaid.initialize({ startOnLoad: false, theme: 'dark' });
 
         const BASE = window.location.origin;
+
+        // --- Splash / Landing Page ---
+        (function initSplash() {
+            const SPLASH_SECONDS = 15;
+            let remaining = SPLASH_SECONDS;
+            let serviceReady = false;
+            const overlay = document.getElementById('splashOverlay');
+            const barFill = document.getElementById('splashBarFill');
+            const statusEl = document.getElementById('splashStatus');
+            const countdownEl = document.getElementById('splashCountdown');
+            const startBtn = document.getElementById('splashStartBtn');
+
+            // Poll /healthz every 2s to detect when instance is warm
+            const healthPoll = setInterval(async () => {
+                try {
+                    const resp = await fetch(BASE + '/healthz', { signal: AbortSignal.timeout(3000) });
+                    if (resp.ok) {
+                        serviceReady = true;
+                        statusEl.textContent = 'Services ready';
+                        clearInterval(healthPoll);
+                    }
+                } catch (_) { /* still warming up */ }
+            }, 2000);
+
+            // Countdown timer
+            const tick = setInterval(() => {
+                remaining--;
+                const pct = ((SPLASH_SECONDS - remaining) / SPLASH_SECONDS) * 100;
+                barFill.style.width = pct + '%';
+                if (remaining > 0) {
+                    countdownEl.textContent = 'Starting in ' + remaining + 's';
+                    if (!serviceReady) {
+                        // Cycle through status messages
+                        const msgs = ['Warming up services...', 'Loading AI models...', 'Connecting to cloud infrastructure...', 'Preparing brainstorming environment...'];
+                        statusEl.textContent = msgs[Math.floor((SPLASH_SECONDS - remaining) / 4) % msgs.length];
+                    }
+                } else {
+                    clearInterval(tick);
+                    clearInterval(healthPoll);
+                    barFill.style.width = '100%';
+                    countdownEl.textContent = '';
+                    statusEl.textContent = serviceReady ? 'All systems go' : 'Ready';
+                    startBtn.style.display = 'inline-block';
+                }
+                // Allow early dismiss once service is ready and at least 5s have passed
+                if (serviceReady && remaining <= (SPLASH_SECONDS - 5)) {
+                    clearInterval(tick);
+                    clearInterval(healthPoll);
+                    barFill.style.width = '100%';
+                    countdownEl.textContent = '';
+                    statusEl.textContent = 'All systems go';
+                    startBtn.style.display = 'inline-block';
+                }
+            }, 1000);
+        })();
+
+        function dismissSplash() {
+            const overlay = document.getElementById('splashOverlay');
+            overlay.classList.add('hidden');
+            // Remove from DOM after transition
+            setTimeout(() => overlay.remove(), 700);
+        }
         const WS_URL = BASE.replace('http://', 'ws://').replace('https://', 'wss://') + '/live';
         let ws = null;
         let cameraStream = null;
