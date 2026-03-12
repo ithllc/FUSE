@@ -24,6 +24,7 @@ from src.agents.proof_orchestrator import ProofOrchestrator
 from src.output.diagram_renderer import DiagramRenderer
 from src.output.imagen_diagram_visualizer import ImagenDiagramVisualizer
 from src.output.veo3_diagram_animator import Veo3DiagramAnimator
+from google.genai import types as genai_types
 
 # Load environment variables
 load_dotenv()
@@ -217,7 +218,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     while session_active:
                         message = await websocket.receive()
                         if "bytes" in message:
-                            await session.send(input=message["bytes"], end_of_turn=False)
+                            # Wrap PCM16 audio in Blob for Gemini Live SDK
+                            audio_blob = genai_types.Blob(
+                                data=message["bytes"],
+                                mime_type="audio/pcm;rate=16000"
+                            )
+                            await session.send_realtime_input(audio=audio_blob)
                         elif "text" in message:
                             raw = message["text"]
                             try:
