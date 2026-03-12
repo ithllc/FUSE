@@ -897,6 +897,24 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 btn.classList.add('active');
                 indicator.style.display = 'inline';
                 addMsg('system', 'Microphone active - speak your commands. Audio is streaming to Gemini Live.');
+
+                // If in diagnostics state, send the diagnostic prompt after a brief
+                // delay to ensure audio is flowing to Gemini first (fixes #11).
+                if (sessionState === 'diagnostics') {
+                    setTimeout(() => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            addConnectionLog('DIAG: Sending diagnostic prompt to Gemini...', 'info');
+                            ws.send(JSON.stringify({ text:
+                                "You are starting a new FUSE session. Begin with a brief diagnostic. " +
+                                "Say: 'Hello! I am FUSE, your brainstorming assistant. " +
+                                "Please say a few words to test your microphone.' " +
+                                "Then wait for the user to speak. When you hear them, respond: " +
+                                "'I can hear you clearly. Diagnostics passed.' " +
+                                "Keep this brief."
+                            }));
+                        }
+                    }, 1000); // 1s delay — ensures audio chunks are streaming first
+                }
             } catch (e) {
                 addMsg('system', 'Microphone access denied: ' + e.message);
             }
