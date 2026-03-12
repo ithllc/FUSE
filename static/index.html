@@ -915,12 +915,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 placeholder.style.display = 'none';
                 btn.classList.add('active');
 
-                // Auto-stream frames via HTTP /vision/frame (NOT through WebSocket — WS is audio-only)
+                // Auto-stream frames via HTTP /vision/frame (NOT through WebSocket)
+                // WebSocket carries audio only — sending video through Live API would cut
+                // session limit from 15 min to 2 min. The HTTP vision pipeline provides
+                // two-pass scene classification + mode-specific extraction instead.
                 frameInterval = setInterval(() => {
                     if (sessionState === 'active') {
                         sendVideoFrameHTTP();
                     }
-                }, 2000); // 0.5 FPS via HTTP to avoid overloading the vision pipeline
+                }, 1000); // 1 FPS — matches Gemini's video processing rate; server-side debounce handles backpressure
             } catch (e) {
                 addMsg('system', 'Camera access denied: ' + e.message);
             }
