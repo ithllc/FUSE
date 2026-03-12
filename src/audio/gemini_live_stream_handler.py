@@ -45,6 +45,8 @@ class GeminiLiveStreamHandler:
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             proactivity=types.ProactivityConfig(proactive_audio=True),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
             system_instruction=types.Content(
                 parts=[
                     types.Part.from_text(

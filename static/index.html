@@ -437,6 +437,7 @@
         /* System Status Panel */
         #systemStatusPanel .health-ok { color: #3fb950; }
         #systemStatusPanel .health-error { color: #f85149; }
+        #systemStatusPanel .health-warn { color: #d29922; }
         #systemStatusPanel .health-dot {
             display: inline-block;
             width: 8px; height: 8px;
@@ -704,11 +705,12 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         // --- WebSocket ---
         function toggleWebSocket() {
-            if (ws && ws.readyState === WebSocket.OPEN) {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
                 ws.close();
-            } else {
+            } else if (!ws || ws.readyState === WebSocket.CLOSED) {
                 connectWebSocket();
             }
+            // If CLOSING, do nothing — wait for onclose to fire
         }
 
         function connectWebSocket() {
@@ -721,7 +723,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 sessionState = 'diagnostics';
                 setStatus(true);
                 addConnectionLog('WebSocket connected', 'ok');
-                addMsg('system', 'Connected. Running pre-session diagnostics...');
+                addMsg('system', 'Connected. Preparing diagnostics...');
                 document.getElementById('btnConnect').textContent = 'End Session';
                 document.getElementById('btnConnect').style.background = '#da3633';
                 document.getElementById('btnConnect').style.borderColor = '#f85149';
@@ -735,10 +737,10 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 diagAudioChunks = 0;
                 diagLastAudioTime = 0;
                 diagFirstBurstDone = false;
-                // Start diagnostic timeout — auto-transition even if not all checks pass
-                diagTimer = setTimeout(() => finishDiagnostics('timeout'), DIAG_TIMEOUT_MS);
                 // Run camera diagnostic after brief delay (camera needs time to initialize)
                 setTimeout(runCameraDiagnostic, 2000);
+                // 3-2-1 countdown then prompt user to speak
+                runDiagCountdown();
             };
 
             ws.onmessage = (event) => {
@@ -762,8 +764,37 @@ Powered by Gemini 3.1 Pro Preview.</div>
                             return;
                         }
 
+                        // Handle transcription messages (user speech + Gemini speech)
+                        if (data.type === 'transcript') {
+                            if (data.role === 'user') {
+                                addMsg('user', data.text);
+                                // Diagnostic: user speech detected via transcription
+                                if (sessionState === 'diagnostics' && !diagChecks.micInput && data.text.trim()) {
+                                    diagChecks.micInput = true;
+                                    addConnectionLog('DIAG: Microphone input PASS — speech transcribed: "' + data.text.substring(0, 40) + '"', 'ok');
+                                    addMsg('system', 'Diagnostic: Microphone working. Your speech was detected.');
+                                    checkDiagComplete();
+                                }
+                            } else if (data.role === 'fuse') {
+                                addMsg('fuse', data.text);
+                                checkForMermaid(data.text);
+                            }
+                            return;
+                        }
+
+                        // Handle voice command results (proxy, mode switch)
+                        if (data.type === 'command_result') {
+                            addMsg('system', data.text);
+                            // Update proxy table from server data
+                            if (data.proxies) {
+                                proxyRegistry = data.proxies;
+                                updateProxyTable();
+                            }
+                            return;
+                        }
+
                         // Handle regular text messages (existing behavior)
-                        if (data.text) {
+                        if (data.text && !data.type) {
                             addMsg('fuse', data.text);
                             checkForMermaid(data.text);
                         }
@@ -774,36 +805,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
                     // Binary audio response from Gemini - play it back
                     playAudioResponse(event.data);
 
-                    // Diagnostic: track audio bursts from Gemini using gap detection.
-                    // First burst = Gemini greeting (audio output PASS).
-                    // Gap of >1.5s = first burst done, Gemini is listening.
-                    // Second burst = Gemini responding to user speech (mic input PASS).
+                    // Diagnostic: any audio from Gemini = audio output works.
+                    // Mic input is confirmed separately via input transcription.
                     if (sessionState === 'diagnostics') {
-                        const now = Date.now();
-                        diagAudioChunks++;
-
-                        // First audio chunk ever → audio output works
                         if (!diagChecks.audioOutput) {
                             diagChecks.audioOutput = true;
                             addConnectionLog('DIAG: Audio output PASS — receiving audio from Gemini', 'ok');
-                            addMsg('system', 'Diagnostic: Audio output working. FUSE is speaking.');
-                        }
-
-                        // Detect gap between bursts: if >1.5s since last audio, first burst is done
-                        if (diagLastAudioTime > 0 && (now - diagLastAudioTime) > 1500 && !diagFirstBurstDone) {
-                            diagFirstBurstDone = true;
-                            addConnectionLog('DIAG: Gemini greeting complete. Listening for your voice...', 'info');
-                        }
-
-                        // Second burst after gap → Gemini heard the user and is responding
-                        if (diagFirstBurstDone && !diagChecks.micInput) {
-                            diagChecks.micInput = true;
-                            addConnectionLog('DIAG: Microphone input PASS — Gemini responded to your voice', 'ok');
-                            addMsg('system', 'Diagnostic: Microphone acknowledged. FUSE can hear you.');
+                            addMsg('system', 'Diagnostic: Audio output working. FUSE is responding.');
                             checkDiagComplete();
                         }
-
-                        diagLastAudioTime = now;
                     }
                 }
             };
@@ -917,11 +927,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 indicator.style.display = 'inline';
                 addMsg('system', 'Microphone active - audio is streaming to Gemini Live.');
 
-                // Diagnostic greeting comes from Gemini's system instruction —
-                // no need to send a text prompt (see issue #12).
                 if (sessionState === 'diagnostics') {
-                    addConnectionLog('DIAG: Waiting for Gemini greeting (from system instruction)...', 'info');
-                    addMsg('system', 'Waiting for FUSE to greet you... Please say a few words when prompted.');
+                    addConnectionLog('DIAG: Mic active, waiting for countdown to prompt user...', 'info');
                 }
             } catch (e) {
                 addMsg('system', 'Microphone access denied: ' + e.message);
@@ -1477,6 +1484,27 @@ Powered by Gemini 3.1 Pro Preview.</div>
         }
 
         // --- Pre-Session Diagnostics ---
+        function runDiagCountdown() {
+            if (sessionState !== 'diagnostics') return;
+            let count = 3;
+            addMsg('system', 'Microphone test starting in 3...');
+            addConnectionLog('DIAG: Countdown starting — 3...', 'info');
+            const interval = setInterval(() => {
+                count--;
+                if (sessionState !== 'diagnostics') { clearInterval(interval); return; }
+                if (count > 0) {
+                    addMsg('system', count + '...');
+                    addConnectionLog('DIAG: ' + count + '...', 'info');
+                } else {
+                    clearInterval(interval);
+                    addMsg('system', 'Say "Hello FUSE" now to test your microphone.');
+                    addConnectionLog('DIAG: Waiting for user to speak...', 'info');
+                    // Start diagnostic timeout AFTER countdown completes
+                    diagTimer = setTimeout(() => finishDiagnostics('timeout'), DIAG_TIMEOUT_MS);
+                }
+            }, 1000);
+        }
+
         async function runCameraDiagnostic() {
             if (sessionState !== 'diagnostics') return;
             if (!cameraStream) {

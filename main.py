@@ -226,6 +226,19 @@ async def websocket_endpoint(websocket: WebSocket):
             # Shared flag so tasks can signal each other to stop
             session_active = True
 
+            async def _check_voice_commands(text: str):
+                """Parse transcribed speech for proxy and mode commands."""
+                if not state_manager:
+                    return
+                result = await live_handler.process_simulated_command(text)
+                if result and result != "Command not recognized.":
+                    logger.info(f"Voice command detected: {result}")
+                    await websocket.send_text(json.dumps({
+                        "type": "command_result",
+                        "text": result,
+                        "proxies": state_manager.get_proxy_registry()
+                    }))
+
             async def receive_from_client():
                 nonlocal session_active
                 try:
@@ -264,12 +277,41 @@ async def websocket_endpoint(websocket: WebSocket):
                             break
                         if hasattr(response, 'server_content') and response.server_content:
                             sc = response.server_content
+
+                            # Input transcription (what the user said)
+                            if hasattr(sc, 'input_transcription') and sc.input_transcription:
+                                t = sc.input_transcription
+                                if hasattr(t, 'text') and t.text:
+                                    await websocket.send_text(json.dumps({
+                                        "type": "transcript",
+                                        "role": "user",
+                                        "text": t.text,
+                                        "finished": getattr(t, 'finished', False)
+                                    }))
+                                    if state_manager and getattr(t, 'finished', False):
+                                        state_manager.log_event("voice_input", {"text": t.text})
+                                        # Check for proxy commands in user speech
+                                        await _check_voice_commands(t.text)
+
+                            # Output transcription (what Gemini said)
+                            if hasattr(sc, 'output_transcription') and sc.output_transcription:
+                                t = sc.output_transcription
+                                if hasattr(t, 'text') and t.text:
+                                    await websocket.send_text(json.dumps({
+                                        "type": "transcript",
+                                        "role": "fuse",
+                                        "text": t.text,
+                                        "finished": getattr(t, 'finished', False)
+                                    }))
+                                    if state_manager and getattr(t, 'finished', False):
+                                        state_manager.log_event("gemini_output", {"text": t.text})
+
                             if hasattr(sc, 'model_turn') and sc.model_turn and sc.model_turn.parts:
                                 for part in sc.model_turn.parts:
                                     if hasattr(part, 'text') and part.text:
                                         await websocket.send_text(json.dumps({"text": part.text}))
                                         if state_manager:
-                                            state_manager.log_event("voice_input", {"text": part.text})
+                                            state_manager.log_event("gemini_output", {"text": part.text})
                                     if hasattr(part, 'inline_data') and part.inline_data:
                                         await websocket.send_bytes(part.inline_data.data)
                         if hasattr(response, 'text') and response.text:
@@ -291,15 +333,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(receive_from_client()),
                 asyncio.create_task(send_to_client()),
             ]
-
-            # Brief delay for audio stream to establish, then send a realtime
-            # text trigger to activate the greeting. Unlike session.send(),
-            # send_realtime_input(text=) works alongside audio streaming (#13).
-            await asyncio.sleep(0.5)
-            await session.send_realtime_input(
-                text="Begin the session. Greet the user now."
-            )
-            logger.info("Sent realtime text trigger for diagnostic greeting.")
 
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
