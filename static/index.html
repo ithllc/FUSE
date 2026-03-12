@@ -937,12 +937,42 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         // --- WebSocket ---
         function toggleWebSocket() {
-            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-                ws.close();
-            } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+            // Use sessionState as source of truth, not ws.readyState (#17)
+            if (sessionState === 'active' || sessionState === 'diagnostics') {
+                // End session
+                addConnectionLog('User clicked End Session', 'info');
+                if (ws) {
+                    try { ws.close(1000, 'User ended session'); } catch (_) {}
+                }
+                // Force cleanup even if close doesn't fire immediately
+                sessionState = 'ending';
+                document.getElementById('btnConnect').textContent = 'Ending...';
+                document.getElementById('btnConnect').disabled = true;
+                // Safety timeout: if onclose doesn't fire within 3s, force cleanup
+                setTimeout(() => {
+                    if (sessionState === 'ending') {
+                        forceCleanup();
+                    }
+                }, 3000);
+            } else if (sessionState === 'idle' || sessionState === 'ended') {
                 connectWebSocket();
             }
-            // If CLOSING, do nothing — wait for onclose to fire
+            // If 'ending', do nothing — wait for cleanup
+        }
+
+        function forceCleanup() {
+            ws = null;
+            setStatus(false);
+            clearSessionTimer();
+            if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
+            document.getElementById('btnConnect').textContent = 'Start Session';
+            document.getElementById('btnConnect').style.background = '';
+            document.getElementById('btnConnect').style.borderColor = '';
+            document.getElementById('btnConnect').disabled = false;
+            if (micActive) toggleMic();
+            if (cameraStream) toggleCamera();
+            sessionState = 'ended';
+            showSessionOverlay();
         }
 
         function connectWebSocket() {
@@ -1051,10 +1081,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
             };
 
             ws.onclose = (event) => {
-                const wasActive = sessionState === 'active' || sessionState === 'diagnostics';
-                setStatus(false);
-                clearSessionTimer();
-                if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
+                const wasActive = sessionState === 'active' || sessionState === 'diagnostics' || sessionState === 'ending';
 
                 // Log close code and reason for diagnostics
                 const reason = event.reason || 'No reason provided';
@@ -1072,9 +1099,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 addConnectionLog('WebSocket closed: ' + codeDesc + ' — ' + reason, event.code === 1000 ? 'ok' : 'error');
                 addMsg('system', 'Disconnected: ' + codeDesc);
 
+                // Full cleanup via shared function (#17)
+                ws = null;
+                setStatus(false);
+                clearSessionTimer();
+                if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
                 document.getElementById('btnConnect').textContent = 'Start Session';
                 document.getElementById('btnConnect').style.background = '';
                 document.getElementById('btnConnect').style.borderColor = '';
+                document.getElementById('btnConnect').disabled = false;
                 // Stop mic and camera
                 if (micActive) toggleMic();
                 if (cameraStream) toggleCamera();
@@ -1216,16 +1249,18 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 // session limit from 15 min to 2 min. The HTTP vision pipeline provides
                 // two-pass scene classification + mode-specific extraction instead.
                 frameInterval = setInterval(() => {
-                    if (sessionState === 'active' || sessionState === 'diagnostics') {
+                    if (sessionState === 'active') {
                         sendVideoFrameHTTP();
                     }
-                }, 1000); // 1 FPS — matches Gemini's video processing rate; server-side debounce handles backpressure
+                }, 2000); // 0.5 FPS — reduced from 1s to prevent request pileup (#15)
             } catch (e) {
                 addMsg('system', 'Camera access denied: ' + e.message);
             }
         }
 
+        let frameInFlight = false; // Backpressure: skip if previous frame still pending (#15)
         function sendVideoFrameHTTP() {
+            if (frameInFlight) return; // Skip — previous frame still processing
             const video = document.getElementById('localVideo');
             const canvas = document.getElementById('captureCanvas');
             canvas.width = 640;
@@ -1234,14 +1269,18 @@ Powered by Gemini 3.1 Pro Preview.</div>
             ctx.drawImage(video, 0, 0, 640, 480);
             canvas.toBlob(async (blob) => {
                 if (!blob) return;
+                frameInFlight = true;
                 try {
-                    await fetch(BASE + '/vision/frame', {
+                    const resp = await fetch(BASE + '/vision/frame', {
                         method: 'POST',
                         body: blob,
-                        headers: { 'Content-Type': 'application/octet-stream' }
+                        headers: { 'Content-Type': 'application/octet-stream' },
+                        signal: AbortSignal.timeout(10000) // 10s timeout per frame
                     });
                 } catch (e) {
                     // Silently ignore frame send failures during streaming
+                } finally {
+                    frameInFlight = false;
                 }
             }, 'image/jpeg', 0.7);
         }
