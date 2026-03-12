@@ -192,6 +192,14 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info("WebSocket connection established.")
     logger.info(f"Live handler model: {live_handler.model_id}, location: {live_handler.location}")
 
+    # Session resumption state (issue #18)
+    resumption_handle = None
+    # Track whether this is the first Gemini connection (show diagnostics only once)
+    first_connect = True
+    # Client-level flag: True while the browser WebSocket is alive
+    client_connected = True
+    MAX_RECONNECTS = 10
+
     try:
         # Stage: connecting to Gemini
         await websocket.send_text(json.dumps({
@@ -200,153 +208,215 @@ async def websocket_endpoint(websocket: WebSocket):
             "message": "Connecting to Gemini Live API..."
         }))
 
-        async with live_handler.client.aio.live.connect(
-            model=live_handler.model_id,
-            config=live_handler.get_config()
-        ) as session:
-            # Stage: connected
-            logger.info("Gemini Live session connected successfully.")
-            await websocket.send_text(json.dumps({
-                "type": "status",
-                "stage": "connected",
-                "message": "Live session active. Running diagnostics...",
-                "model": live_handler.model_id,
-                "location": live_handler.location
-            }))
+        reconnect_count = 0
 
-            # Stage: diagnostics — proactive_audio + system instruction tell Gemini
-            # to greet immediately. A realtime text trigger activates the greeting
-            # after the audio stream starts (issues #11, #12, #13).
-            await websocket.send_text(json.dumps({
-                "type": "status",
-                "stage": "diagnostics",
-                "message": "Running pre-session diagnostics..."
-            }))
-
-            # Shared flag so tasks can signal each other to stop
-            session_active = True
-
-            async def _check_voice_commands(text: str):
-                """Parse transcribed speech for proxy and mode commands."""
-                if not state_manager:
-                    return
-                result = await live_handler.process_simulated_command(text)
-                if result and result != "Command not recognized.":
-                    logger.info(f"Voice command detected: {result}")
-                    await websocket.send_text(json.dumps({
-                        "type": "command_result",
-                        "text": result,
-                        "proxies": state_manager.get_proxy_registry()
-                    }))
-
-            async def receive_from_client():
-                nonlocal session_active
-                try:
-                    while session_active:
-                        message = await websocket.receive()
-                        if "bytes" in message:
-                            # Wrap PCM16 audio in Blob for Gemini Live SDK
-                            audio_blob = genai_types.Blob(
-                                data=message["bytes"],
-                                mime_type="audio/pcm;rate=16000"
-                            )
-                            await session.send_realtime_input(audio=audio_blob)
-                        elif "text" in message:
-                            raw = message["text"]
-                            try:
-                                parsed = json.loads(raw)
-                                text_val = parsed.get("text", raw) if isinstance(parsed, dict) else raw
-                            except (json.JSONDecodeError, TypeError):
-                                text_val = raw
-                            if state_manager:
-                                state_manager.log_event("voice_input", {"text": text_val})
-                            await session.send(input=text_val, end_of_turn=True)
-                except WebSocketDisconnect:
-                    logger.info("Client disconnected from WebSocket.")
-                except Exception as e:
-                    if session_active:
-                        logger.error(f"Error in receive_from_client: {e}")
-                finally:
-                    session_active = False
-
-            async def send_to_client():
-                nonlocal session_active
-                try:
-                    async for response in session.receive():
-                        if response is None:
-                            break
-                        if hasattr(response, 'server_content') and response.server_content:
-                            sc = response.server_content
-
-                            # Input transcription (what the user said)
-                            if hasattr(sc, 'input_transcription') and sc.input_transcription:
-                                t = sc.input_transcription
-                                if hasattr(t, 'text') and t.text:
-                                    await websocket.send_text(json.dumps({
-                                        "type": "transcript",
-                                        "role": "user",
-                                        "text": t.text,
-                                        "finished": getattr(t, 'finished', False)
-                                    }))
-                                    if state_manager and getattr(t, 'finished', False):
-                                        state_manager.log_event("voice_input", {"text": t.text})
-                                        # Check for proxy commands in user speech
-                                        await _check_voice_commands(t.text)
-
-                            # Output transcription (what Gemini said)
-                            if hasattr(sc, 'output_transcription') and sc.output_transcription:
-                                t = sc.output_transcription
-                                if hasattr(t, 'text') and t.text:
-                                    await websocket.send_text(json.dumps({
-                                        "type": "transcript",
-                                        "role": "fuse",
-                                        "text": t.text,
-                                        "finished": getattr(t, 'finished', False)
-                                    }))
-                                    if state_manager and getattr(t, 'finished', False):
-                                        state_manager.log_event("gemini_output", {"text": t.text})
-
-                            if hasattr(sc, 'model_turn') and sc.model_turn and sc.model_turn.parts:
-                                for part in sc.model_turn.parts:
-                                    if hasattr(part, 'text') and part.text:
-                                        await websocket.send_text(json.dumps({"text": part.text}))
-                                        if state_manager:
-                                            state_manager.log_event("gemini_output", {"text": part.text})
-                                    if hasattr(part, 'inline_data') and part.inline_data:
-                                        await websocket.send_bytes(part.inline_data.data)
-                        if hasattr(response, 'text') and response.text:
-                            await websocket.send_text(json.dumps({"text": response.text}))
-                        if hasattr(response, 'data') and response.data:
-                            await websocket.send_bytes(response.data)
-                except Exception as e:
-                    error_str = str(e)
-                    # Gemini session closing with code 1000 is a normal end, not an error
-                    if "1000" in error_str:
-                        logger.info("Gemini Live session ended normally.")
+        # --- Gemini reconnect loop (issue #18) ---
+        # The Gemini Live API may end sessions after turn completion, GoAway,
+        # or server-side resets. When this happens, we reconnect transparently
+        # using the saved resumption handle. The client WebSocket stays open.
+        while client_connected and reconnect_count < MAX_RECONNECTS:
+            try:
+                config = live_handler.get_config(resumption_handle=resumption_handle)
+                async with live_handler.client.aio.live.connect(
+                    model=live_handler.model_id,
+                    config=config
+                ) as session:
+                    if first_connect:
+                        logger.info("Gemini Live session connected successfully.")
+                        await websocket.send_text(json.dumps({
+                            "type": "status",
+                            "stage": "connected",
+                            "message": "Live session active. Running diagnostics...",
+                            "model": live_handler.model_id,
+                            "location": live_handler.location
+                        }))
+                        await websocket.send_text(json.dumps({
+                            "type": "status",
+                            "stage": "diagnostics",
+                            "message": "Running pre-session diagnostics..."
+                        }))
+                        first_connect = False
                     else:
-                        logger.error(f"Error in send_to_client: {e}\n{traceback.format_exc()}")
-                finally:
-                    session_active = False
+                        logger.info(f"Gemini Live session reconnected (attempt {reconnect_count}, handle={'yes' if resumption_handle else 'no'}).")
+                        await websocket.send_text(json.dumps({
+                            "type": "status",
+                            "stage": "reconnected",
+                            "message": "Audio session reconnected."
+                        }))
 
-            # Run both tasks; when either finishes, cancel the other
-            tasks = [
-                asyncio.create_task(receive_from_client()),
-                asyncio.create_task(send_to_client()),
-            ]
+                    # Shared flag so tasks can signal each other to stop
+                    session_active = True
+                    # Flag set by GoAway handler to trigger clean reconnect
+                    needs_reconnect = False
 
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                    async def _check_voice_commands(text: str):
+                        """Parse transcribed speech for proxy and mode commands."""
+                        if not state_manager:
+                            return
+                        result = await live_handler.process_simulated_command(text)
+                        if result and result != "Command not recognized.":
+                            logger.info(f"Voice command detected: {result}")
+                            await websocket.send_text(json.dumps({
+                                "type": "command_result",
+                                "text": result,
+                                "proxies": state_manager.get_proxy_registry()
+                            }))
+
+                    async def receive_from_client():
+                        nonlocal session_active, client_connected
+                        try:
+                            while session_active:
+                                message = await websocket.receive()
+                                if "bytes" in message:
+                                    audio_blob = genai_types.Blob(
+                                        data=message["bytes"],
+                                        mime_type="audio/pcm;rate=16000"
+                                    )
+                                    await session.send_realtime_input(audio=audio_blob)
+                                elif "text" in message:
+                                    raw = message["text"]
+                                    try:
+                                        parsed = json.loads(raw)
+                                        text_val = parsed.get("text", raw) if isinstance(parsed, dict) else raw
+                                    except (json.JSONDecodeError, TypeError):
+                                        text_val = raw
+                                    if state_manager:
+                                        state_manager.log_event("voice_input", {"text": text_val})
+                                    # Use send_realtime_input for text (issue #18)
+                                    # Deprecated session.send() causes sessions to go
+                                    # unresponsive after first turn_complete (python-genai #1224)
+                                    await session.send_realtime_input(text=text_val)
+                        except WebSocketDisconnect:
+                            logger.info("Client disconnected from WebSocket.")
+                            client_connected = False
+                        except Exception as e:
+                            if session_active:
+                                logger.error(f"Error in receive_from_client: {e}")
+                            client_connected = False
+                        finally:
+                            session_active = False
+
+                    async def send_to_client():
+                        nonlocal session_active, needs_reconnect, resumption_handle
+                        try:
+                            async for response in session.receive():
+                                if response is None:
+                                    break
+
+                                # Capture session resumption handle (issue #18)
+                                if hasattr(response, 'session_resumption_update') and response.session_resumption_update:
+                                    update = response.session_resumption_update
+                                    if hasattr(update, 'new_handle') and update.new_handle:
+                                        resumption_handle = update.new_handle
+                                        logger.info("Session resumption handle updated.")
+
+                                # Handle GoAway: Gemini server will close soon (issue #18)
+                                if hasattr(response, 'go_away') and response.go_away is not None:
+                                    time_left = getattr(response.go_away, 'time_left', 'unknown')
+                                    logger.warning(f"Gemini GoAway received, time_left={time_left}. Will reconnect.")
+                                    if state_manager:
+                                        state_manager.log_event("gemini_goaway", {"time_left": str(time_left)})
+                                    needs_reconnect = True
+                                    break
+
+                                if hasattr(response, 'server_content') and response.server_content:
+                                    sc = response.server_content
+
+                                    # Input transcription (what the user said)
+                                    if hasattr(sc, 'input_transcription') and sc.input_transcription:
+                                        t = sc.input_transcription
+                                        if hasattr(t, 'text') and t.text:
+                                            await websocket.send_text(json.dumps({
+                                                "type": "transcript",
+                                                "role": "user",
+                                                "text": t.text,
+                                                "finished": getattr(t, 'finished', False)
+                                            }))
+                                            if state_manager and getattr(t, 'finished', False):
+                                                state_manager.log_event("voice_input", {"text": t.text})
+                                                await _check_voice_commands(t.text)
+
+                                    # Output transcription (what Gemini said)
+                                    if hasattr(sc, 'output_transcription') and sc.output_transcription:
+                                        t = sc.output_transcription
+                                        if hasattr(t, 'text') and t.text:
+                                            await websocket.send_text(json.dumps({
+                                                "type": "transcript",
+                                                "role": "fuse",
+                                                "text": t.text,
+                                                "finished": getattr(t, 'finished', False)
+                                            }))
+                                            if state_manager and getattr(t, 'finished', False):
+                                                state_manager.log_event("gemini_output", {"text": t.text})
+
+                                    if hasattr(sc, 'model_turn') and sc.model_turn and sc.model_turn.parts:
+                                        for part in sc.model_turn.parts:
+                                            if hasattr(part, 'text') and part.text:
+                                                await websocket.send_text(json.dumps({"text": part.text}))
+                                                if state_manager:
+                                                    state_manager.log_event("gemini_output", {"text": part.text})
+                                            if hasattr(part, 'inline_data') and part.inline_data:
+                                                await websocket.send_bytes(part.inline_data.data)
+                                if hasattr(response, 'text') and response.text:
+                                    await websocket.send_text(json.dumps({"text": response.text}))
+                                if hasattr(response, 'data') and response.data:
+                                    await websocket.send_bytes(response.data)
+                        except Exception as e:
+                            error_str = str(e)
+                            if "1000" in error_str:
+                                logger.info("Gemini Live session ended normally (code 1000). Will reconnect.")
+                                needs_reconnect = True
+                            else:
+                                logger.error(f"Error in send_to_client: {e}\n{traceback.format_exc()}")
+                                needs_reconnect = True
+                        finally:
+                            session_active = False
+
+                    # Run both tasks; when either finishes, cancel the other
+                    tasks = [
+                        asyncio.create_task(receive_from_client()),
+                        asyncio.create_task(send_to_client()),
+                    ]
+
+                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+
+                # After exiting async with, decide: reconnect or exit
+                if not client_connected:
+                    logger.info("Client disconnected, stopping reconnect loop.")
+                    break
+
+                if needs_reconnect:
+                    reconnect_count += 1
+                    logger.info(f"Reconnecting Gemini session ({reconnect_count}/{MAX_RECONNECTS})...")
+                    await asyncio.sleep(0.5)
+                    continue
+
+                # session.receive() ended without GoAway or error — reconnect anyway
+                reconnect_count += 1
+                logger.info(f"Gemini receive loop ended, reconnecting ({reconnect_count}/{MAX_RECONNECTS})...")
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {e}"
+                logger.error(f"Gemini connect error (attempt {reconnect_count}): {error_msg}\n{traceback.format_exc()}")
+                reconnect_count += 1
+                if reconnect_count >= MAX_RECONNECTS or not client_connected:
+                    break
+                await asyncio.sleep(1.0)
+
+        if reconnect_count >= MAX_RECONNECTS:
+            logger.error(f"Max Gemini reconnects ({MAX_RECONNECTS}) reached. Closing WebSocket.")
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
         logger.error(f"Live session error at stage 'gemini_connect': {error_msg}\n{traceback.format_exc()}")
 
-        # Log as session event for diagnostics
         if state_manager:
             state_manager.log_event("connection_error", {
                 "stage": "gemini_connect",
@@ -354,7 +424,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 "detail": str(e),
             })
 
-        # Send structured error to client before closing
         try:
             await websocket.send_text(json.dumps({
                 "type": "error",
@@ -366,6 +435,11 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception:
             pass
     finally:
+        # Send proper close frame so client sees 1000 instead of 1006 (issue #18)
+        try:
+            await websocket.close(code=1000, reason="Session ended")
+        except Exception:
+            pass
         logger.info("WebSocket connection closed.")
 
 @app.get("/render")

@@ -40,13 +40,28 @@ class GeminiLiveStreamHandler:
         # Vertex AI Live API model (GA)
         self.model_id = "gemini-live-2.5-flash-native-audio"
 
-    def get_config(self) -> types.LiveConnectConfig:
-        """Returns the configuration for the Gemini 3.1 Flash Live session."""
+    def get_config(self, resumption_handle: str = None) -> types.LiveConnectConfig:
+        """Returns the configuration for the Gemini Live session.
+
+        Args:
+            resumption_handle: Optional handle from a previous session for seamless
+                reconnection. Pass None for the first connection.
+        """
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             proactivity=types.ProactivityConfig(proactive_audio=True),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            # Session resumption: survives Gemini server-side connection resets.
+            # Tokens are valid for 2 hours (Vertex AI) after last session end.
+            session_resumption=types.SessionResumptionConfig(
+                handle=resumption_handle
+            ),
+            # Context window compression: prevents 128k token exhaustion.
+            # Without this, audio-only sessions are limited to ~15 minutes.
+            context_window_compression=types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow(),
+            ),
             system_instruction=types.Content(
                 parts=[
                     types.Part.from_text(
