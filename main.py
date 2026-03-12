@@ -204,10 +204,28 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(json.dumps({
                 "type": "status",
                 "stage": "connected",
-                "message": "Live session active. You can speak or type.",
+                "message": "Live session active. Running diagnostics...",
                 "model": live_handler.model_id,
                 "location": live_handler.location
             }))
+
+            # Stage: diagnostics — ask Gemini to speak test instructions
+            await websocket.send_text(json.dumps({
+                "type": "status",
+                "stage": "diagnostics",
+                "message": "Running pre-session diagnostics..."
+            }))
+            await session.send(
+                input=(
+                    "You are starting a new FUSE session. Begin with a brief diagnostic. "
+                    "Say exactly: 'Hello! I am FUSE, your brainstorming assistant. "
+                    "Let me run a quick check. Please say a few words to test your microphone.' "
+                    "Then wait for the user to speak. When you hear them, respond: "
+                    "'I can hear you clearly. Diagnostics passed. Let us begin your brainstorming session.' "
+                    "Keep this diagnostic brief — two sentences max per response."
+                ),
+                end_of_turn=True,
+            )
 
             # Shared flag so tasks can signal each other to stop
             session_active = True

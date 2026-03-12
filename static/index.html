@@ -678,7 +678,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let cameraStream = null;
         let frameInterval = null;
         const proxyRegistry = {};
-        let sessionState = 'idle'; // idle | active | ended
+        let sessionState = 'idle'; // idle | diagnostics | active | ended
 
         // --- Audio state ---
         let micActive = false;
@@ -693,6 +693,12 @@ Powered by Gemini 3.1 Pro Preview.</div>
         const SESSION_WARN_MS = 4 * 60 * 1000; // warn at 4 minutes (1 min remaining)
         let sessionTimer = null;
         let countdownInterval = null;
+
+        // --- Pre-session diagnostics ---
+        let diagChecks = { audioOutput: false, micInput: false, camera: false };
+        let diagAudioChunks = 0; // count audio response chunks from Gemini
+        let diagTimer = null;
+        const DIAG_TIMEOUT_MS = 20000; // 20s max for diagnostics
 
         // --- WebSocket ---
         function toggleWebSocket() {
@@ -710,20 +716,25 @@ Powered by Gemini 3.1 Pro Preview.</div>
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
-                sessionState = 'active';
+                sessionState = 'diagnostics';
                 setStatus(true);
                 addConnectionLog('WebSocket connected', 'ok');
-                addMsg('system', 'Connected to Gemini Live API session.');
+                addMsg('system', 'Connected. Running pre-session diagnostics...');
                 document.getElementById('btnConnect').textContent = 'End Session';
                 document.getElementById('btnConnect').style.background = '#da3633';
                 document.getElementById('btnConnect').style.borderColor = '#f85149';
                 // Sync vision mode selector with server state
                 fetchVisionMode();
-                // Auto-activate camera and mic on successful connection
+                // Auto-activate camera and mic — needed for diagnostic tests
                 if (!cameraStream) toggleCamera();
                 if (!micActive) toggleMic();
-                // Start 5-minute session timer
-                startSessionTimer();
+                // Reset diagnostic state
+                diagChecks = { audioOutput: false, micInput: false, camera: false };
+                diagAudioChunks = 0;
+                // Start diagnostic timeout — auto-transition even if not all checks pass
+                diagTimer = setTimeout(() => finishDiagnostics('timeout'), DIAG_TIMEOUT_MS);
+                // Run camera diagnostic after brief delay (camera needs time to initialize)
+                setTimeout(runCameraDiagnostic, 2000);
             };
 
             ws.onmessage = (event) => {
@@ -734,7 +745,9 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         // Handle structured status messages
                         if (data.type === 'status') {
                             addConnectionLog(data.message, 'ok');
-                            addMsg('system', data.message);
+                            if (data.stage !== 'diagnostics') {
+                                addMsg('system', data.message);
+                            }
                             return;
                         }
 
@@ -756,13 +769,31 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 } else if (event.data instanceof ArrayBuffer) {
                     // Binary audio response from Gemini - play it back
                     playAudioResponse(event.data);
+
+                    // Diagnostic: track audio chunks from Gemini
+                    if (sessionState === 'diagnostics') {
+                        diagAudioChunks++;
+                        if (diagAudioChunks === 1 && !diagChecks.audioOutput) {
+                            diagChecks.audioOutput = true;
+                            addConnectionLog('DIAG: Audio output PASS — receiving audio from Gemini', 'ok');
+                            addMsg('system', 'Diagnostic: Audio output working.');
+                        }
+                        // After ~10+ chunks with mic active, Gemini is responding to user speech
+                        if (diagAudioChunks > 15 && micActive && !diagChecks.micInput) {
+                            diagChecks.micInput = true;
+                            addConnectionLog('DIAG: Microphone input PASS — Gemini acknowledged audio', 'ok');
+                            addMsg('system', 'Diagnostic: Microphone input acknowledged.');
+                            checkDiagComplete();
+                        }
+                    }
                 }
             };
 
             ws.onclose = (event) => {
-                const wasActive = sessionState === 'active';
+                const wasActive = sessionState === 'active' || sessionState === 'diagnostics';
                 setStatus(false);
                 clearSessionTimer();
+                if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
 
                 // Log close code and reason for diagnostics
                 const reason = event.reason || 'No reason provided';
@@ -920,7 +951,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 // session limit from 15 min to 2 min. The HTTP vision pipeline provides
                 // two-pass scene classification + mode-specific extraction instead.
                 frameInterval = setInterval(() => {
-                    if (sessionState === 'active') {
+                    if (sessionState === 'active' || sessionState === 'diagnostics') {
                         sendVideoFrameHTTP();
                     }
                 }, 1000); // 1 FPS — matches Gemini's video processing rate; server-side debounce handles backpressure
@@ -1407,6 +1438,93 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 '<div style="color:' + e.color + '">' + e.ts + ' ' + e.message + '</div>'
             ).join('');
             el.scrollTop = el.scrollHeight;
+        }
+
+        // --- Pre-Session Diagnostics ---
+        async function runCameraDiagnostic() {
+            if (sessionState !== 'diagnostics') return;
+            if (!cameraStream) {
+                addConnectionLog('DIAG: Camera SKIP — camera not available', 'error');
+                addMsg('system', 'Diagnostic: Camera not available. Skipping camera test.');
+                return;
+            }
+            try {
+                const video = document.getElementById('localVideo');
+                const canvas = document.getElementById('captureCanvas');
+                canvas.width = 640;
+                canvas.height = 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, 640, 480);
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.7));
+                if (!blob || blob.size < 1000) {
+                    addConnectionLog('DIAG: Camera SKIP — frame too small (camera may still be initializing)', 'error');
+                    // Retry once after 2s
+                    setTimeout(async () => {
+                        if (sessionState !== 'diagnostics' || diagChecks.camera) return;
+                        ctx.drawImage(video, 0, 0, 640, 480);
+                        const blob2 = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.7));
+                        if (blob2 && blob2.size >= 1000) {
+                            const resp = await fetch(BASE + '/vision/frame', { method: 'POST', body: blob2, headers: { 'Content-Type': 'application/octet-stream' } });
+                            const data = await resp.json();
+                            if (data.status === 'success' || data.status === 'skipped') {
+                                diagChecks.camera = true;
+                                addConnectionLog('DIAG: Camera PASS — frame sent successfully', 'ok');
+                                addMsg('system', 'Diagnostic: Camera working.');
+                                checkDiagComplete();
+                            }
+                        }
+                    }, 2000);
+                    return;
+                }
+                const resp = await fetch(BASE + '/vision/frame', { method: 'POST', body: blob, headers: { 'Content-Type': 'application/octet-stream' } });
+                const data = await resp.json();
+                if (data.status === 'success' || data.status === 'skipped') {
+                    diagChecks.camera = true;
+                    addConnectionLog('DIAG: Camera PASS — frame sent successfully', 'ok');
+                    addMsg('system', 'Diagnostic: Camera working.');
+                    checkDiagComplete();
+                } else {
+                    addConnectionLog('DIAG: Camera FAIL — ' + (data.message || data.reason), 'error');
+                    addMsg('system', 'Diagnostic: Camera test failed — ' + (data.message || data.reason));
+                }
+            } catch (e) {
+                addConnectionLog('DIAG: Camera FAIL — ' + e.message, 'error');
+                addMsg('system', 'Diagnostic: Camera test error — ' + e.message);
+            }
+        }
+
+        function checkDiagComplete() {
+            if (sessionState !== 'diagnostics') return;
+            const allPassed = diagChecks.audioOutput && diagChecks.micInput && diagChecks.camera;
+            if (allPassed) {
+                finishDiagnostics('passed');
+            }
+        }
+
+        function finishDiagnostics(reason) {
+            if (sessionState !== 'diagnostics') return;
+            if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
+
+            const results = [
+                'Audio Output: ' + (diagChecks.audioOutput ? 'PASS' : 'FAIL'),
+                'Mic Input: ' + (diagChecks.micInput ? 'PASS' : 'NOT CONFIRMED'),
+                'Camera: ' + (diagChecks.camera ? 'PASS' : 'NOT CONFIRMED'),
+            ];
+            const allPassed = diagChecks.audioOutput && diagChecks.micInput && diagChecks.camera;
+
+            if (reason === 'timeout') {
+                addConnectionLog('DIAG: Timeout reached (' + (DIAG_TIMEOUT_MS/1000) + 's). ' + results.join(', '), allPassed ? 'ok' : 'error');
+                addMsg('system', 'Diagnostics timed out. ' + results.join(' | ') + '. Proceeding to session.');
+            } else {
+                addConnectionLog('DIAG: All checks passed. ' + results.join(', '), 'ok');
+                addMsg('system', 'All diagnostics passed. Starting session.');
+            }
+
+            // Transition to active session
+            sessionState = 'active';
+            addConnectionLog('Session active', 'ok');
+            // Start 5-minute session timer now (not during diagnostics)
+            startSessionTimer();
         }
 
         // --- Toast ---
