@@ -209,9 +209,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 "location": live_handler.location
             }))
 
-            # Stage: diagnostics — client will send the prompt AFTER mic audio is streaming.
-            # Sending it server-side here would cause Gemini to respond and close the session
-            # because no realtime audio stream would be active yet (issue #11).
+            # Stage: diagnostics — Gemini's system instruction tells it to greet
+            # immediately. No text prompt needed (issues #11, #12).
             await websocket.send_text(json.dumps({
                 "type": "status",
                 "stage": "diagnostics",

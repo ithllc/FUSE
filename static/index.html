@@ -696,9 +696,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         // --- Pre-session diagnostics ---
         let diagChecks = { audioOutput: false, micInput: false, camera: false };
-        let diagAudioChunks = 0; // count audio response chunks from Gemini
+        let diagAudioChunks = 0;
+        let diagLastAudioTime = 0; // timestamp of last audio chunk
+        let diagFirstBurstDone = false; // true after first greeting burst ends
         let diagTimer = null;
-        const DIAG_TIMEOUT_MS = 20000; // 20s max for diagnostics
+        const DIAG_TIMEOUT_MS = 25000; // 25s max for diagnostics
 
         // --- WebSocket ---
         function toggleWebSocket() {
@@ -731,6 +733,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 // Reset diagnostic state
                 diagChecks = { audioOutput: false, micInput: false, camera: false };
                 diagAudioChunks = 0;
+                diagLastAudioTime = 0;
+                diagFirstBurstDone = false;
                 // Start diagnostic timeout — auto-transition even if not all checks pass
                 diagTimer = setTimeout(() => finishDiagnostics('timeout'), DIAG_TIMEOUT_MS);
                 // Run camera diagnostic after brief delay (camera needs time to initialize)
@@ -770,21 +774,36 @@ Powered by Gemini 3.1 Pro Preview.</div>
                     // Binary audio response from Gemini - play it back
                     playAudioResponse(event.data);
 
-                    // Diagnostic: track audio chunks from Gemini
+                    // Diagnostic: track audio bursts from Gemini using gap detection.
+                    // First burst = Gemini greeting (audio output PASS).
+                    // Gap of >1.5s = first burst done, Gemini is listening.
+                    // Second burst = Gemini responding to user speech (mic input PASS).
                     if (sessionState === 'diagnostics') {
+                        const now = Date.now();
                         diagAudioChunks++;
-                        if (diagAudioChunks === 1 && !diagChecks.audioOutput) {
+
+                        // First audio chunk ever → audio output works
+                        if (!diagChecks.audioOutput) {
                             diagChecks.audioOutput = true;
                             addConnectionLog('DIAG: Audio output PASS — receiving audio from Gemini', 'ok');
-                            addMsg('system', 'Diagnostic: Audio output working.');
+                            addMsg('system', 'Diagnostic: Audio output working. FUSE is speaking.');
                         }
-                        // After ~10+ chunks with mic active, Gemini is responding to user speech
-                        if (diagAudioChunks > 15 && micActive && !diagChecks.micInput) {
+
+                        // Detect gap between bursts: if >1.5s since last audio, first burst is done
+                        if (diagLastAudioTime > 0 && (now - diagLastAudioTime) > 1500 && !diagFirstBurstDone) {
+                            diagFirstBurstDone = true;
+                            addConnectionLog('DIAG: Gemini greeting complete. Listening for your voice...', 'info');
+                        }
+
+                        // Second burst after gap → Gemini heard the user and is responding
+                        if (diagFirstBurstDone && !diagChecks.micInput) {
                             diagChecks.micInput = true;
-                            addConnectionLog('DIAG: Microphone input PASS — Gemini acknowledged audio', 'ok');
-                            addMsg('system', 'Diagnostic: Microphone input acknowledged.');
+                            addConnectionLog('DIAG: Microphone input PASS — Gemini responded to your voice', 'ok');
+                            addMsg('system', 'Diagnostic: Microphone acknowledged. FUSE can hear you.');
                             checkDiagComplete();
                         }
+
+                        diagLastAudioTime = now;
                     }
                 }
             };
@@ -896,24 +915,13 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 micActive = true;
                 btn.classList.add('active');
                 indicator.style.display = 'inline';
-                addMsg('system', 'Microphone active - speak your commands. Audio is streaming to Gemini Live.');
+                addMsg('system', 'Microphone active - audio is streaming to Gemini Live.');
 
-                // If in diagnostics state, send the diagnostic prompt after a brief
-                // delay to ensure audio is flowing to Gemini first (fixes #11).
+                // Diagnostic greeting comes from Gemini's system instruction —
+                // no need to send a text prompt (see issue #12).
                 if (sessionState === 'diagnostics') {
-                    setTimeout(() => {
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            addConnectionLog('DIAG: Sending diagnostic prompt to Gemini...', 'info');
-                            ws.send(JSON.stringify({ text:
-                                "You are starting a new FUSE session. Begin with a brief diagnostic. " +
-                                "Say: 'Hello! I am FUSE, your brainstorming assistant. " +
-                                "Please say a few words to test your microphone.' " +
-                                "Then wait for the user to speak. When you hear them, respond: " +
-                                "'I can hear you clearly. Diagnostics passed.' " +
-                                "Keep this brief."
-                            }));
-                        }
-                    }, 1000); // 1s delay — ensures audio chunks are streaming first
+                    addConnectionLog('DIAG: Waiting for Gemini greeting (from system instruction)...', 'info');
+                    addMsg('system', 'Waiting for FUSE to greet you... Please say a few words when prompted.');
                 }
             } catch (e) {
                 addMsg('system', 'Microphone access denied: ' + e.message);
