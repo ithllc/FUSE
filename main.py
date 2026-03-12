@@ -55,6 +55,11 @@ async def serve_ui():
     with open(html_path, "r") as f:
         return HTMLResponse(content=f.read())
 
+@app.get("/healthz")
+async def healthz():
+    """Lightweight liveness probe — no downstream checks."""
+    return {"status": "ok"}
+
 @app.get("/health")
 async def health_check():
     """Deep health check — verifies all downstream components."""
@@ -209,8 +214,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 "location": live_handler.location
             }))
 
-            # Stage: diagnostics — Gemini's system instruction tells it to greet
-            # immediately. No text prompt needed (issues #11, #12).
+            # Stage: diagnostics — proactive_audio + system instruction tell Gemini
+            # to greet immediately. A realtime text trigger activates the greeting
+            # after the audio stream starts (issues #11, #12, #13).
             await websocket.send_text(json.dumps({
                 "type": "status",
                 "stage": "diagnostics",
@@ -285,6 +291,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(receive_from_client()),
                 asyncio.create_task(send_to_client()),
             ]
+
+            # Brief delay for audio stream to establish, then send a realtime
+            # text trigger to activate the greeting. Unlike session.send(),
+            # send_realtime_input(text=) works alongside audio streaming (#13).
+            await asyncio.sleep(0.5)
+            await session.send_realtime_input(
+                text="Begin the session. Greet the user now."
+            )
+            logger.info("Sent realtime text trigger for diagnostic greeting.")
+
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()

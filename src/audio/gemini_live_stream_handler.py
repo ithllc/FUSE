@@ -44,6 +44,7 @@ class GeminiLiveStreamHandler:
         """Returns the configuration for the Gemini 3.1 Flash Live session."""
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
+            proactivity=types.ProactivityConfig(proactive_audio=True),
             system_instruction=types.Content(
                 parts=[
                     types.Part.from_text(

@@ -700,7 +700,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let diagLastAudioTime = 0; // timestamp of last audio chunk
         let diagFirstBurstDone = false; // true after first greeting burst ends
         let diagTimer = null;
-        const DIAG_TIMEOUT_MS = 25000; // 25s max for diagnostics
+        const DIAG_TIMEOUT_MS = 30000; // 30s max for diagnostics
 
         // --- WebSocket ---
         function toggleWebSocket() {
@@ -1404,10 +1404,20 @@ Powered by Gemini 3.1 Pro Preview.</div>
         async function refreshSystemStatus() {
             try {
                 const resp = await fetch(BASE + '/health');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const data = await resp.json();
                 renderComponentHealth(data.components || {});
                 renderSessionInfo(data.session || {});
             } catch (e) {
+                // Fall back to lightweight liveness probe
+                try {
+                    const lz = await fetch(BASE + '/healthz');
+                    if (lz.ok) {
+                        document.getElementById('componentHealth').innerHTML =
+                            '<span class="health-warn">Service alive (deep health unavailable)</span>';
+                        return;
+                    }
+                } catch (_) { /* ignore */ }
                 document.getElementById('componentHealth').innerHTML =
                     '<span class="health-error">Failed to fetch health: ' + e.message + '</span>';
             }
