@@ -350,6 +350,48 @@ All features work identically to local development. The Cloud Run deployment inc
 
 ---
 
+## System Status & Diagnostics
+
+FUSE includes a built-in diagnostics panel for testing and demo debugging.
+
+### Opening the System Status Panel
+
+1. Click the **gear icon ("Status")** button in the header bar (next to "Start Session")
+2. The panel expands below the header showing three sections:
+   - **Components**: Green/red health indicators for Redis, Gemini Live, Gemini Vision, Gemini Pro, Diagram Renderer, Imagen 4.0, and Veo 3.0
+   - **Session**: Current vision mode, proxy object count, diagram length, and recent event count
+   - **Connection Log**: Timestamped, color-coded log of WebSocket connection stages, errors, and close codes
+
+### Understanding Connection Errors
+
+When a session fails, the Connection Log shows exactly where the failure occurred:
+
+| Stage | Meaning |
+|-------|---------|
+| `initialization` | Live handler failed to start (server may still be booting) |
+| `connecting` | WebSocket opened, now connecting to Gemini Live API |
+| `connected` | Gemini session active, ready for voice/text |
+| `gemini_connect` | Gemini Live API connection failed (check model access, region, permissions) |
+
+### WebSocket Close Codes
+
+| Code | Meaning |
+|------|---------|
+| 1000 | Normal closure (session ended intentionally) |
+| 1006 | Abnormal closure (no close frame — network issue or server crash) |
+| 1011 | Server error (handler not initialized or internal failure) |
+
+### Health Check API
+
+```bash
+# Deep health check with component status and session summary
+curl http://localhost:8080/health
+```
+
+Returns `"status": "ok"` when all components are healthy, or `"status": "degraded"` when any component is down. The `components` object shows per-component status, and the `session` object shows current state metrics and recent errors.
+
+---
+
 ## Troubleshooting
 
 ### WebSocket Connection Fails

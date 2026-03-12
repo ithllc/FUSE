@@ -162,6 +162,26 @@ All 10 errors have been fixed:
 
 ---
 
+## Error #11: No Client-Side Diagnostic Visibility (UAT Observability Gap)
+
+**Severity**: MODERATE — Prevents testers from identifying failure causes
+**Date identified**: 2026-03-11
+**Files affected**: `main.py`, `static/index.html`, `src/state/session_state_manager.py`
+
+**Symptoms**: When a Live session failed (e.g., Gemini API returned 403, or handler failed to initialize), the UI showed only "Disconnected" with no indication of what went wrong. Testers could not distinguish between a network issue, a server startup delay, or a model access permission error.
+
+**Root cause**: The original `/health` endpoint returned a static JSON with no component checks. The WebSocket handler sent generic `[ERROR]` text without stage or error type information. No close code or reason was surfaced to the user.
+
+**Fix applied**:
+1. **Deep `/health` endpoint**: Verifies Redis ping (with latency), all 6 handler initializations, and returns session diagnostics including recent connection errors
+2. **Structured WebSocket messages**: Server sends `{"type": "status", "stage": "connecting"}` and `{"type": "error", "stage": "gemini_connect", "error_type": "...", "detail": "..."}` messages at each connection stage
+3. **Connection error event logging**: Errors are persisted as `connection_error` events in Redis for post-mortem analysis
+4. **System Status UI panel**: Collapsible panel with component health indicators, session metrics, and timestamped connection log
+5. **WebSocket close code parsing**: Close codes (1000, 1006, 1011, etc.) are translated to human-readable descriptions
+6. **`get_session_diagnostics()`**: New method in `SessionStateManager` aggregating vision mode, proxy count, diagram length, and recent errors
+
+---
+
 ## What Was Done Correctly
 
 - Overall FastAPI application structure and endpoint design

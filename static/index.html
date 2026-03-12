@@ -417,6 +417,18 @@
         }
         .overlay-close:hover { background: #21262d; color: #e1e4e8; }
 
+        /* System Status Panel */
+        #systemStatusPanel .health-ok { color: #3fb950; }
+        #systemStatusPanel .health-error { color: #f85149; }
+        #systemStatusPanel .health-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        #systemStatusPanel .health-dot.ok { background: #3fb950; }
+        #systemStatusPanel .health-dot.error { background: #f85149; }
+
         /* Toast notification */
         .toast {
             position: fixed;
@@ -447,6 +459,7 @@
             <span>Collaborative Brainstorming Intelligence</span>
         </div>
         <div class="btn-group">
+            <button class="btn btn-sm" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
             <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Start Session</button>
             <div class="status-badge disconnected" id="statusBadge">
                 <div class="status-dot"></div>
@@ -454,6 +467,30 @@
             </div>
         </div>
     </header>
+
+    <!-- System Status Panel (collapsible) -->
+    <div id="systemStatusPanel" style="display:none;">
+        <div class="panel" style="margin:0 16px; border-radius:0 0 12px 12px; border-top:none;">
+            <div class="panel-body" style="padding:12px 16px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                    <div>
+                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Components</h3>
+                        <div id="componentHealth" style="font-size:13px; line-height:2;">Loading...</div>
+                    </div>
+                    <div>
+                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Session</h3>
+                        <div id="sessionInfo" style="font-size:13px; line-height:2;">No session data</div>
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Connection Log</h3>
+                    <div id="connectionLog" style="font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; background:#0d1117; border-radius:6px; padding:8px; color:#8b949e;">
+                        No events yet.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="main-grid">
         <!-- Left Column: Camera Feed + Session Notes -->
@@ -642,12 +679,14 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         function connectWebSocket() {
             addMsg('system', 'Connecting to FUSE Live...');
+            addConnectionLog('Opening WebSocket to ' + WS_URL, 'info');
             ws = new WebSocket(WS_URL);
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
                 sessionState = 'active';
                 setStatus(true);
+                addConnectionLog('WebSocket connected', 'ok');
                 addMsg('system', 'Connected to Gemini Live API session.');
                 document.getElementById('btnConnect').textContent = 'End Session';
                 document.getElementById('btnConnect').style.background = '#da3633';
@@ -663,6 +702,22 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 if (typeof event.data === 'string') {
                     try {
                         const data = JSON.parse(event.data);
+
+                        // Handle structured status messages
+                        if (data.type === 'status') {
+                            addConnectionLog(data.message, 'ok');
+                            addMsg('system', data.message);
+                            return;
+                        }
+
+                        // Handle structured error messages
+                        if (data.type === 'error') {
+                            addConnectionLog('[' + data.stage + '] ' + data.message, 'error');
+                            addMsg('system', 'Error (' + data.stage + '): ' + data.message);
+                            return;
+                        }
+
+                        // Handle regular text messages (existing behavior)
                         if (data.text) {
                             addMsg('fuse', data.text);
                             checkForMermaid(data.text);
@@ -676,10 +731,26 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 }
             };
 
-            ws.onclose = () => {
+            ws.onclose = (event) => {
                 const wasActive = sessionState === 'active';
                 setStatus(false);
-                addMsg('system', 'Disconnected from live session.');
+
+                // Log close code and reason for diagnostics
+                const reason = event.reason || 'No reason provided';
+                const codeMap = {
+                    1000: 'Normal closure',
+                    1001: 'Going away',
+                    1006: 'Abnormal closure (no close frame)',
+                    1008: 'Policy violation',
+                    1011: 'Server error',
+                    1012: 'Service restart',
+                    1013: 'Try again later',
+                    1014: 'Bad gateway',
+                };
+                const codeDesc = codeMap[event.code] || ('Code ' + event.code);
+                addConnectionLog('WebSocket closed: ' + codeDesc + ' — ' + reason, event.code === 1000 ? 'ok' : 'error');
+                addMsg('system', 'Disconnected: ' + codeDesc);
+
                 document.getElementById('btnConnect').textContent = 'Start Session';
                 document.getElementById('btnConnect').style.background = '';
                 document.getElementById('btnConnect').style.borderColor = '';
@@ -696,7 +767,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
             };
 
             ws.onerror = (e) => {
-                addMsg('system', 'WebSocket error. Check server logs.');
+                addConnectionLog('WebSocket error (check browser console for details)', 'error');
+                addMsg('system', 'WebSocket connection error. See System Status for details.');
             };
         }
 
@@ -1186,6 +1258,81 @@ Powered by Gemini 3.1 Pro Preview.</div>
                     document.getElementById('visionMode').value = data.mode;
                 }
             } catch (e) { /* ignore */ }
+        }
+
+        // --- System Status / Diagnostics ---
+        let connectionLog = [];
+
+        function toggleSystemStatus() {
+            const panel = document.getElementById('systemStatusPanel');
+            const isVisible = panel.style.display !== 'none';
+            panel.style.display = isVisible ? 'none' : 'block';
+            if (!isVisible) refreshSystemStatus();
+        }
+
+        async function refreshSystemStatus() {
+            try {
+                const resp = await fetch(BASE + '/health');
+                const data = await resp.json();
+                renderComponentHealth(data.components || {});
+                renderSessionInfo(data.session || {});
+            } catch (e) {
+                document.getElementById('componentHealth').innerHTML =
+                    '<span class="health-error">Failed to fetch health: ' + e.message + '</span>';
+            }
+        }
+
+        function renderComponentHealth(components) {
+            const el = document.getElementById('componentHealth');
+            const names = {
+                redis: 'Redis', gemini_live: 'Gemini Live', gemini_vision: 'Gemini Vision',
+                gemini_pro: 'Gemini Pro', diagram_renderer: 'Diagram Renderer',
+                imagen: 'Imagen 4.0', veo3: 'Veo 3.0'
+            };
+            let html = '';
+            for (const [key, info] of Object.entries(components)) {
+                const ok = info.status === 'ok';
+                const label = names[key] || key;
+                const detail = ok
+                    ? (info.latency_ms !== undefined ? ' (' + info.latency_ms + 'ms)' : '')
+                    : ' — ' + (info.detail || 'Unknown error');
+                html += '<div><span class="health-dot ' + (ok ? 'ok' : 'error') + '"></span>' + label + detail + '</div>';
+            }
+            el.innerHTML = html || 'No components reported.';
+        }
+
+        function renderSessionInfo(session) {
+            const el = document.getElementById('sessionInfo');
+            if (!session || Object.keys(session).length === 0) {
+                el.textContent = 'No session data available.';
+                return;
+            }
+            el.innerHTML = [
+                'Vision Mode: <strong>' + (session.vision_mode || 'N/A') + '</strong>',
+                'Proxy Objects: <strong>' + (session.proxy_count ?? 'N/A') + '</strong>',
+                'Diagram Length: <strong>' + (session.diagram_length ?? 0) + ' chars</strong>',
+                'Recent Events: <strong>' + (session.recent_events ?? 0) + '</strong>',
+            ].join('<br>');
+        }
+
+        function addConnectionLog(message, level) {
+            const ts = new Date().toLocaleTimeString('en-US', {hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+            const color = level === 'error' ? '#f85149' : level === 'ok' ? '#3fb950' : '#8b949e';
+            connectionLog.push({ ts, message, color });
+            if (connectionLog.length > 50) connectionLog.shift();
+            renderConnectionLog();
+        }
+
+        function renderConnectionLog() {
+            const el = document.getElementById('connectionLog');
+            if (connectionLog.length === 0) {
+                el.textContent = 'No events yet.';
+                return;
+            }
+            el.innerHTML = connectionLog.map(e =>
+                '<div style="color:' + e.color + '">' + e.ts + ' ' + e.message + '</div>'
+            ).join('');
+            el.scrollTop = el.scrollHeight;
         }
 
         // --- Toast ---

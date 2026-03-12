@@ -77,6 +77,27 @@ class SessionStateManager:
             lines.append(payload.get("text", payload.get("role", str(payload))))
         return "\n".join(lines) if lines else ""
 
+    def get_session_diagnostics(self) -> Dict[str, Any]:
+        """Returns aggregated session state for the diagnostics UI."""
+        diagnostics = {
+            "vision_mode": self.get_vision_mode(),
+            "proxy_count": len(self.get_proxy_registry()),
+            "proxy_registry": self.get_proxy_registry(),
+        }
+
+        arch_state = self.get_architectural_state()
+        diagnostics["diagram_length"] = len(arch_state) if arch_state else 0
+
+        # Recent events with error filtering
+        events = self.get_events(limit=20)
+        diagnostics["total_events"] = len(events)
+        diagnostics["recent_errors"] = [
+            e for e in events if e.get("type") == "connection_error"
+        ][:5]
+        diagnostics["last_event"] = events[0] if events else None
+
+        return diagnostics
+
 
 if __name__ == "__main__":
     pass

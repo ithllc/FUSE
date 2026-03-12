@@ -63,6 +63,9 @@ Event types:
 - `voice_input` — User text or model text response (used for Charades transcript injection)
 - `mode_switch` — Vision mode changed via command
 - `validation` — Periodic or on-demand architecture validation result
+- `connection_error` — WebSocket/Gemini connection failure with stage, error_type, and detail
+- `imagen_generation` — Imagen visualization event
+- `veo3_generation` — Veo3 animation event
 
 ## 4. State Lifecycle
 1.  **Initialization**: The `SessionStateManager` clears or initializes the session on server startup.
@@ -79,3 +82,21 @@ Redis                          VisionStateCapture
 ├── events (voice_input) ───► CHARADES_PROMPT (Pass 2)
 └── vision_mode ─────────────► Mode selection (Pass 1 skip or auto)
 ```
+
+## 6. Session Diagnostics
+
+The `get_session_diagnostics()` method aggregates session state for the UAT observability UI:
+
+```python
+{
+    "vision_mode": "auto",
+    "proxy_count": 3,
+    "proxy_registry": {"stapler": "GPU cluster", ...},
+    "diagram_length": 450,
+    "total_events": 12,
+    "recent_errors": [{"type": "connection_error", ...}],
+    "last_event": {...}
+}
+```
+
+This is consumed by the `/health` endpoint and the client-side System Status panel.

@@ -4,6 +4,7 @@ import logging
 import os
 import json
 import sys
+import time
 import traceback
 from typing import Optional
 from dotenv import load_dotenv
@@ -55,7 +56,57 @@ async def serve_ui():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "active", "system": "FUSE", "project_id": PROJECT_ID}
+    """Deep health check — verifies all downstream components."""
+    components = {}
+
+    # 1. Redis
+    try:
+        if state_manager:
+            t0 = time.time()
+            state_manager.r.ping()
+            latency_ms = int((time.time() - t0) * 1000)
+            components["redis"] = {"status": "ok", "latency_ms": latency_ms}
+        else:
+            components["redis"] = {"status": "error", "detail": "State manager not initialized"}
+    except Exception as e:
+        components["redis"] = {"status": "error", "detail": str(e)}
+
+    # 2. Component initialization checks
+    component_checks = {
+        "gemini_live": live_handler,
+        "gemini_vision": vision_capture,
+        "gemini_pro": proof_orchestrator,
+        "diagram_renderer": diagram_renderer,
+        "imagen": imagen_visualizer,
+        "veo3": veo3_animator,
+    }
+    for name, handler in component_checks.items():
+        if handler is not None:
+            components[name] = {"status": "ok"}
+        else:
+            components[name] = {"status": "error", "detail": "Not initialized"}
+
+    # 3. Session state summary
+    session = {}
+    if state_manager and components["redis"]["status"] == "ok":
+        try:
+            diag = state_manager.get_session_diagnostics()
+            session["vision_mode"] = diag["vision_mode"]
+            session["proxy_count"] = diag["proxy_count"]
+            session["diagram_length"] = diag["diagram_length"]
+            session["recent_events"] = diag["total_events"]
+            session["recent_errors"] = diag["recent_errors"]
+        except Exception:
+            pass
+
+    all_ok = all(c.get("status") == "ok" for c in components.values())
+    return {
+        "status": "ok" if all_ok else "degraded",
+        "system": "FUSE",
+        "project_id": PROJECT_ID,
+        "components": components,
+        "session": session,
+    }
 
 @app.post("/command")
 async def trigger_command(text: str):
@@ -117,8 +168,17 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     Handles bidirectional multimodal streaming (Audio/Vision/Text).
     Connects the client directly to the Gemini Live session.
+    Sends structured status/error messages for client-side diagnostics.
     """
     if not live_handler:
+        await websocket.accept()
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "stage": "initialization",
+            "message": "Live handler not initialized. Server may still be starting up.",
+            "error_type": "InitializationError",
+            "detail": "GeminiLiveStreamHandler failed to initialize during server startup."
+        }))
         await websocket.close(code=1011)
         return
 
@@ -127,12 +187,26 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info(f"Live handler model: {live_handler.model_id}, location: {live_handler.location}")
 
     try:
+        # Stage: connecting to Gemini
+        await websocket.send_text(json.dumps({
+            "type": "status",
+            "stage": "connecting",
+            "message": "Connecting to Gemini Live API..."
+        }))
+
         async with live_handler.client.aio.live.connect(
             model=live_handler.model_id,
             config=live_handler.get_config()
         ) as session:
+            # Stage: connected
             logger.info("Gemini Live session connected successfully.")
-            await websocket.send_text(json.dumps({"text": "[FUSE] Live session active. You can speak or type."}))
+            await websocket.send_text(json.dumps({
+                "type": "status",
+                "stage": "connected",
+                "message": "Live session active. You can speak or type.",
+                "model": live_handler.model_id,
+                "location": live_handler.location
+            }))
 
             async def receive_from_client():
                 try:
@@ -142,13 +216,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             await session.send(input=message["bytes"], end_of_turn=False)
                         elif "text" in message:
                             raw = message["text"]
-                            # Browser sends JSON like {"text": "..."} - extract inner text
                             try:
                                 parsed = json.loads(raw)
                                 text_val = parsed.get("text", raw) if isinstance(parsed, dict) else raw
                             except (json.JSONDecodeError, TypeError):
                                 text_val = raw
-                            # Log user text for vision context injection (Phase 3)
                             if state_manager:
                                 state_manager.log_event("voice_input", {"text": text_val})
                             await session.send(input=text_val, end_of_turn=True)
@@ -160,19 +232,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     async for response in session.receive():
                         if response is None:
                             break
-                        # Handle server_content with model_turn parts
                         if hasattr(response, 'server_content') and response.server_content:
                             sc = response.server_content
                             if hasattr(sc, 'model_turn') and sc.model_turn and sc.model_turn.parts:
                                 for part in sc.model_turn.parts:
                                     if hasattr(part, 'text') and part.text:
                                         await websocket.send_text(json.dumps({"text": part.text}))
-                                        # Log model responses for vision context injection (Phase 3)
                                         if state_manager:
                                             state_manager.log_event("voice_input", {"text": part.text})
                                     if hasattr(part, 'inline_data') and part.inline_data:
                                         await websocket.send_bytes(part.inline_data.data)
-                        # Handle direct text/data attributes
                         if hasattr(response, 'text') and response.text:
                             await websocket.send_text(json.dumps({"text": response.text}))
                         if hasattr(response, 'data') and response.data:
@@ -183,10 +252,26 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.gather(receive_from_client(), send_to_client())
 
     except Exception as e:
-        error_msg = f"Live session error: {type(e).__name__}: {e}"
-        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        error_msg = f"{type(e).__name__}: {e}"
+        logger.error(f"Live session error at stage 'gemini_connect': {error_msg}\n{traceback.format_exc()}")
+
+        # Log as session event for diagnostics
+        if state_manager:
+            state_manager.log_event("connection_error", {
+                "stage": "gemini_connect",
+                "error_type": type(e).__name__,
+                "detail": str(e),
+            })
+
+        # Send structured error to client before closing
         try:
-            await websocket.send_text(json.dumps({"text": f"[ERROR] {error_msg}"}))
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "stage": "gemini_connect",
+                "message": f"Live session failed: {error_msg}",
+                "error_type": type(e).__name__,
+                "detail": str(e)
+            }))
         except Exception:
             pass
     finally:

@@ -210,6 +210,8 @@ Frank Ivey & Jeti Olaf
 - [ ] Browser open to FUSE UI, fullscreen or near-fullscreen
 
 ### Technical Checks
+- [ ] Click "Status" gear icon in header — verify all 7 components show green dots
+- [ ] If any component shows red, check server logs and resolve before filming
 - [ ] Microphone working and clear audio
 - [ ] Camera working with good framing
 - [ ] Screen recording software ready (for GCP console proof segment)

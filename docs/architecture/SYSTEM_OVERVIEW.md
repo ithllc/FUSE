@@ -53,7 +53,7 @@ graph TD
 | **VisionPrompts** | Pass 2: Mode-specific prompt templates with context injection (proxy registry, transcript, current diagram state). | Prompt templates |
 | **GeminiLiveStreamHandler** | Bidirectional multimodal intent (Voice/Gestures). Handles proxy assignments and vision mode switching. | `gemini-live-2.5-flash-native-audio` |
 | **ProofOrchestrator** | High-fidelity architectural reasoning and validation. | `gemini-3.1-pro-preview` |
-| **SessionStateManager** | Low-latency state persistence, event logging, vision mode, proxy registry, and transcript retrieval. | Google Cloud Memory Store (Redis) |
+| **SessionStateManager** | Low-latency state persistence, event logging, vision mode, proxy registry, transcript retrieval, and session diagnostics aggregation. | Google Cloud Memory Store (Redis) |
 | **DiagramRenderer** | Automated PNG generation for session output. | Mermaid CLI (`mmdc`) |
 | **ImagenDiagramVisualizer** | Generates photorealistic images from Mermaid diagrams via scene description translation. | `imagen-4.0-generate-001` |
 | **MermaidSceneTranslator** | Parses Mermaid AST and converts nodes/edges into natural-language visual scene descriptions. | Prompt templates |
@@ -92,3 +92,13 @@ The vision system uses a **two-pass architecture** to focus on relevant content:
 *   **REST API (`/render/realistic`)**: Generates a photorealistic image from the current Mermaid state using Imagen 4.0. Returns PNG bytes.
 *   **REST API (`/render/animate`)**: Generates an animated walkthrough video from the realistic image using Veo 3.0. Returns MP4 bytes.
 *   **REST API (`/render/visualize`)**: Full pipeline (Mermaid -> image -> video). Returns JSON with base64-encoded image and video.
+*   **REST API (`/health`)**: Deep health check returning component-level status (Redis ping with latency, all handler initialization checks), session diagnostics summary, and recent connection errors. Returns `"ok"` or `"degraded"` overall status.
+
+## 6. UAT Observability
+
+FUSE includes a lightweight observability layer for user acceptance testing and demo debugging:
+
+- **Deep Health Check** (`/health`): Verifies Redis connectivity (with latency), all 6 component initializations, and session state summary including recent error events.
+- **Structured WebSocket Messages**: The `/live` endpoint sends `{"type": "status", "stage": "..."}` and `{"type": "error", "stage": "...", "error_type": "...", "detail": "..."}` messages at each connection stage (initialization → connecting → connected). Errors are logged as `connection_error` events in Redis.
+- **System Status Panel**: A collapsible UI panel (header gear icon) showing component health with green/red indicators, session metrics (vision mode, proxy count, diagram length), and a timestamped connection log with color-coded entries.
+- **WebSocket Close Diagnostics**: Close codes (1000, 1006, 1011, etc.) are parsed into human-readable descriptions and displayed in both the chat and connection log.
