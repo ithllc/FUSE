@@ -417,6 +417,23 @@
         }
         .overlay-close:hover { background: #21262d; color: #e1e4e8; }
 
+        /* Session countdown banner */
+        .countdown-banner {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            background: linear-gradient(90deg, #da3633, #f85149);
+            color: #fff;
+            text-align: center;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            z-index: 300;
+            animation: pulse-bg 2s ease-in-out infinite;
+        }
+        .countdown-banner.visible { display: block; }
+        @keyframes pulse-bg { 0%, 100% { opacity: 1; } 50% { opacity: 0.85; } }
+
         /* System Status Panel */
         #systemStatusPanel .health-ok { color: #3fb950; }
         #systemStatusPanel .health-error { color: #f85149; }
@@ -646,6 +663,9 @@ Powered by Gemini 3.1 Pro Preview.</div>
         </div>
     </div>
 
+    <!-- Session countdown banner -->
+    <div class="countdown-banner" id="countdownBanner">Session ending in <span id="countdownTime">60</span>s</div>
+
     <!-- Toast notification -->
     <div class="toast" id="toast"></div>
 
@@ -667,6 +687,12 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let micProcessor = null;
         let playbackCtx = null;
         const SAMPLE_RATE = 16000; // 16kHz mono PCM16 for Gemini Live API
+
+        // --- Session timeout ---
+        const SESSION_MAX_MS = 5 * 60 * 1000; // 5 minutes
+        const SESSION_WARN_MS = 4 * 60 * 1000; // warn at 4 minutes (1 min remaining)
+        let sessionTimer = null;
+        let countdownInterval = null;
 
         // --- WebSocket ---
         function toggleWebSocket() {
@@ -696,6 +722,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 // Auto-activate camera and mic on successful connection
                 if (!cameraStream) toggleCamera();
                 if (!micActive) toggleMic();
+                // Start 5-minute session timer
+                startSessionTimer();
             };
 
             ws.onmessage = (event) => {
@@ -734,6 +762,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
             ws.onclose = (event) => {
                 const wasActive = sessionState === 'active';
                 setStatus(false);
+                clearSessionTimer();
 
                 // Log close code and reason for diagnostics
                 const reason = event.reason || 'No reason provided';
@@ -886,27 +915,34 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 placeholder.style.display = 'none';
                 btn.classList.add('active');
 
-                // Auto-stream frames if WebSocket is connected
+                // Auto-stream frames via HTTP /vision/frame (NOT through WebSocket — WS is audio-only)
                 frameInterval = setInterval(() => {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        sendVideoFrame();
+                    if (sessionState === 'active') {
+                        sendVideoFrameHTTP();
                     }
-                }, 500); // 2 FPS
+                }, 2000); // 0.5 FPS via HTTP to avoid overloading the vision pipeline
             } catch (e) {
                 addMsg('system', 'Camera access denied: ' + e.message);
             }
         }
 
-        function sendVideoFrame() {
+        function sendVideoFrameHTTP() {
             const video = document.getElementById('localVideo');
             const canvas = document.getElementById('captureCanvas');
             canvas.width = 640;
             canvas.height = 480;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, 640, 480);
-            canvas.toBlob((blob) => {
-                if (blob && ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(blob);
+            canvas.toBlob(async (blob) => {
+                if (!blob) return;
+                try {
+                    await fetch(BASE + '/vision/frame', {
+                        method: 'POST',
+                        body: blob,
+                        headers: { 'Content-Type': 'application/octet-stream' }
+                    });
+                } catch (e) {
+                    // Silently ignore frame send failures during streaming
                 }
             }, 'image/jpeg', 0.7);
         }
@@ -1258,6 +1294,41 @@ Powered by Gemini 3.1 Pro Preview.</div>
                     document.getElementById('visionMode').value = data.mode;
                 }
             } catch (e) { /* ignore */ }
+        }
+
+        // --- Session Timeout ---
+        function startSessionTimer() {
+            clearSessionTimer();
+            // Warn at 4 minutes (1 minute remaining)
+            sessionTimer = setTimeout(() => {
+                let remaining = 60;
+                const banner = document.getElementById('countdownBanner');
+                document.getElementById('countdownTime').textContent = remaining;
+                banner.classList.add('visible');
+                addMsg('system', 'Session will end in 60 seconds.');
+                addConnectionLog('Session timeout warning: 60s remaining', 'error');
+
+                countdownInterval = setInterval(() => {
+                    remaining--;
+                    document.getElementById('countdownTime').textContent = remaining;
+                    if (remaining <= 0) {
+                        clearInterval(countdownInterval);
+                        countdownInterval = null;
+                        banner.classList.remove('visible');
+                        addMsg('system', 'Session timed out after 5 minutes.');
+                        addConnectionLog('Session closed: 5-minute timeout', 'error');
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.close(1000, 'Session timeout');
+                        }
+                    }
+                }, 1000);
+            }, SESSION_WARN_MS);
+        }
+
+        function clearSessionTimer() {
+            if (sessionTimer) { clearTimeout(sessionTimer); sessionTimer = null; }
+            if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+            document.getElementById('countdownBanner').classList.remove('visible');
         }
 
         // --- System Status / Diagnostics ---

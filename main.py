@@ -208,9 +208,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 "location": live_handler.location
             }))
 
+            # Shared flag so tasks can signal each other to stop
+            session_active = True
+
             async def receive_from_client():
+                nonlocal session_active
                 try:
-                    while True:
+                    while session_active:
                         message = await websocket.receive()
                         if "bytes" in message:
                             await session.send(input=message["bytes"], end_of_turn=False)
@@ -226,8 +230,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             await session.send(input=text_val, end_of_turn=True)
                 except WebSocketDisconnect:
                     logger.info("Client disconnected from WebSocket.")
+                except Exception as e:
+                    if session_active:
+                        logger.error(f"Error in receive_from_client: {e}")
+                finally:
+                    session_active = False
 
             async def send_to_client():
+                nonlocal session_active
                 try:
                     async for response in session.receive():
                         if response is None:
@@ -247,9 +257,27 @@ async def websocket_endpoint(websocket: WebSocket):
                         if hasattr(response, 'data') and response.data:
                             await websocket.send_bytes(response.data)
                 except Exception as e:
-                    logger.error(f"Error in send_to_client: {e}\n{traceback.format_exc()}")
+                    error_str = str(e)
+                    # Gemini session closing with code 1000 is a normal end, not an error
+                    if "1000" in error_str:
+                        logger.info("Gemini Live session ended normally.")
+                    else:
+                        logger.error(f"Error in send_to_client: {e}\n{traceback.format_exc()}")
+                finally:
+                    session_active = False
 
-            await asyncio.gather(receive_from_client(), send_to_client())
+            # Run both tasks; when either finishes, cancel the other
+            tasks = [
+                asyncio.create_task(receive_from_client()),
+                asyncio.create_task(send_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
