@@ -45,6 +45,9 @@ veo3_animator = None
 # Frame processing debounce (Phase 4)
 _processing_frame = False
 
+# Latest camera frame buffer for on-demand capture via Live API function calls (issue #19)
+_latest_frame: Optional[bytes] = None
+
 # Initialize FastAPI app
 app = FastAPI(title="FUSE: Collaborative Brainstorming Intelligence API")
 
@@ -126,7 +129,7 @@ async def trigger_command(text: str):
 @app.post("/vision/frame")
 async def receive_frame(request: Request, mode: Optional[str] = None):
     """Receives a binary image frame. Optional ?mode=whiteboard|imagine|charades override."""
-    global _processing_frame
+    global _processing_frame, _latest_frame
 
     if not vision_capture:
         return {"status": "error", "message": "Vision capture not initialized."}
@@ -138,6 +141,9 @@ async def receive_frame(request: Request, mode: Optional[str] = None):
     frame_bytes = await request.body()
     if not frame_bytes:
         return {"status": "error", "message": "No frame data received."}
+
+    # Buffer latest frame for on-demand capture via Live API function calls (issue #19)
+    _latest_frame = frame_bytes
 
     # Apply mode override if provided
     if mode and mode in ("whiteboard", "imagine", "charades") and state_manager:
@@ -249,6 +255,116 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Flag set by GoAway handler to trigger clean reconnect
                     needs_reconnect = False
 
+                    async def _execute_tool_call(fc) -> dict:
+                        """Execute a function call from Gemini and return the result.
+
+                        Handles: capture_and_analyze_frame, get_session_context,
+                        set_proxy_object. All calls are logged to Redis for audit trail.
+                        (issue #19)
+                        """
+                        t0 = time.time()
+                        func_name = fc.name
+                        func_args = dict(fc.args) if fc.args else {}
+                        call_id = fc.id
+
+                        # Audit: log the tool call
+                        if state_manager:
+                            state_manager.log_event("tool_call", {
+                                "function": func_name,
+                                "arguments": func_args,
+                                "call_id": call_id,
+                            })
+                        logger.info(f"Tool call: {func_name}({func_args}) [id={call_id}]")
+
+                        result = {}
+                        try:
+                            if func_name == "capture_and_analyze_frame":
+                                mode = func_args.get("mode", "auto")
+                                if _latest_frame and vision_capture:
+                                    # Apply mode override
+                                    if mode != "auto" and state_manager:
+                                        state_manager.set_vision_mode(mode)
+                                    mermaid_code = vision_capture.process_received_frame(_latest_frame)
+                                    scene_type = vision_capture._cached_scene.get("scene_type", "unknown") if vision_capture._cached_scene else "unknown"
+                                    result = {
+                                        "status": "success",
+                                        "scene_type": scene_type,
+                                        "mermaid_code": mermaid_code[:500] if mermaid_code else None,
+                                        "mermaid_length": len(mermaid_code) if mermaid_code else 0,
+                                        "description": f"Captured and analyzed frame in {mode} mode. Scene type: {scene_type}.",
+                                    }
+                                else:
+                                    result = {
+                                        "status": "no_frame",
+                                        "description": "No camera frame available. The camera may not be active.",
+                                    }
+
+                            elif func_name == "get_session_context":
+                                if state_manager:
+                                    proxies = state_manager.get_proxy_registry()
+                                    mermaid = state_manager.get_architectural_state()
+                                    transcript = state_manager.get_recent_transcript(limit=5)
+                                    mode = state_manager.get_vision_mode()
+                                    result = {
+                                        "status": "success",
+                                        "proxy_objects": proxies if proxies else "No objects assigned yet.",
+                                        "current_diagram": mermaid[:500] if mermaid else "No diagram yet.",
+                                        "diagram_length": len(mermaid) if mermaid else 0,
+                                        "recent_transcript": transcript or "No recent transcript.",
+                                        "vision_mode": mode,
+                                    }
+                                else:
+                                    result = {"status": "error", "description": "State manager not available."}
+
+                            elif func_name == "set_proxy_object":
+                                obj = func_args.get("object_name", "")
+                                role = func_args.get("technical_role", "")
+                                if obj and role and state_manager:
+                                    state_manager.set_object_proxy(obj, role)
+                                    state_manager.log_event("proxy_assignment", {"object": obj, "role": role})
+                                    logger.info(f"Proxy registered via tool call: {obj} -> {role}")
+                                    result = {
+                                        "status": "success",
+                                        "description": f"Registered {obj} as {role}.",
+                                        "proxy_registry": state_manager.get_proxy_registry(),
+                                    }
+                                    # Notify client of proxy update
+                                    await websocket.send_text(json.dumps({
+                                        "type": "command_result",
+                                        "text": f"Registered: {obj} → {role}",
+                                        "proxies": state_manager.get_proxy_registry(),
+                                    }))
+                                else:
+                                    result = {"status": "error", "description": "Missing object_name or technical_role."}
+
+                            else:
+                                result = {"status": "error", "description": f"Unknown function: {func_name}"}
+
+                        except Exception as e:
+                            logger.error(f"Tool call error ({func_name}): {e}")
+                            result = {"status": "error", "description": str(e)}
+
+                        # Audit: log the tool response
+                        elapsed_ms = int((time.time() - t0) * 1000)
+                        if state_manager:
+                            state_manager.log_event("tool_response", {
+                                "function": func_name,
+                                "call_id": call_id,
+                                "status": result.get("status", "unknown"),
+                                "latency_ms": elapsed_ms,
+                            })
+                        logger.info(f"Tool response: {func_name} -> {result.get('status')} ({elapsed_ms}ms)")
+
+                        # Notify client of tool activity
+                        await websocket.send_text(json.dumps({
+                            "type": "tool_activity",
+                            "function": func_name,
+                            "status": result.get("status", "unknown"),
+                            "latency_ms": elapsed_ms,
+                        }))
+
+                        return result
+
                     async def _check_voice_commands(text: str):
                         """Parse transcribed speech for proxy and mode commands."""
                         if not state_manager:
@@ -318,6 +434,24 @@ async def websocket_endpoint(websocket: WebSocket):
                                         state_manager.log_event("gemini_goaway", {"time_left": str(time_left)})
                                     needs_reconnect = True
                                     break
+
+                                # Handle function calls from Gemini (issue #19)
+                                if hasattr(response, 'tool_call') and response.tool_call:
+                                    function_responses = []
+                                    for fc in response.tool_call.function_calls:
+                                        result = await _execute_tool_call(fc)
+                                        function_responses.append(
+                                            genai_types.FunctionResponse(
+                                                id=fc.id,
+                                                name=fc.name,
+                                                response=result,
+                                            )
+                                        )
+                                    # Send function results back to Gemini
+                                    await session.send_tool_response(
+                                        function_responses=function_responses
+                                    )
+                                    continue
 
                                 if hasattr(response, 'server_content') and response.server_content:
                                     sc = response.server_content

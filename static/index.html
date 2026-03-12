@@ -1055,6 +1055,13 @@ Powered by Gemini 3.1 Pro Preview.</div>
                             return;
                         }
 
+                        // Handle tool activity notifications (issue #19)
+                        if (data.type === 'tool_activity') {
+                            const icon = data.status === 'success' ? '✓' : '✗';
+                            addConnectionLog('TOOL: ' + data.function + ' ' + icon + ' (' + data.latency_ms + 'ms)', data.status === 'success' ? 'ok' : 'error');
+                            return;
+                        }
+
                         // Handle regular text messages (existing behavior)
                         if (data.text && !data.type) {
                             addMsg('fuse', data.text);

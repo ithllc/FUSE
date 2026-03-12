@@ -62,8 +62,48 @@ sequenceDiagram
 ### Frame Debouncing
 The `/vision/frame` endpoint implements frame-level debouncing: if a frame arrives while a previous frame is still being processed, it is dropped with `{"status": "skipped"}`. This prevents processing backlog during continuous streaming.
 
-## 2. "Imagine" Mode: Proxy Object Registry (Live Stream)
-This workflow handles real-time voice-to-state object assignments. Voice input is supported from both the **Web UI** (browser microphone via Web Audio API) and the **Python client** (`client_streamer.py` via PyAudio).
+## 2. Live API Function Calling: On-Demand Vision Capture (Issue #19)
+
+The Gemini Live session supports function calling (tool use). When the user asks Gemini to look at something, Gemini calls `capture_and_analyze_frame` which triggers the REST vision pipeline using the latest buffered camera frame.
+
+### Function Call Flow
+```mermaid
+sequenceDiagram
+    participant User as User (Voice)
+    participant Server as WebSocket /live
+    participant GeminiLive as Gemini 2.5 Flash Live API
+    participant Vision as VisionStateCapture (REST)
+    participant Redis as Session State Manager
+
+    User->>Server: "Do you see that whiteboard?"
+    Server->>GeminiLive: Forward Audio
+    GeminiLive-->>Server: tool_call: capture_and_analyze_frame(mode="whiteboard")
+    Server->>Redis: log_event("tool_call", {...})
+    Server->>Vision: process_received_frame(latest_frame)
+    Vision->>Redis: get_proxy_registry() + get_architectural_state()
+    Vision-->>Server: Mermaid code + scene_type
+    Server->>Redis: log_event("tool_response", {...})
+    Server->>GeminiLive: send_tool_response(result)
+    GeminiLive-->>Server: Audio: "I see a whiteboard with three boxes..."
+    Server-->>User: Audio playback
+```
+
+### Registered Functions
+
+| Function | Trigger | What It Does |
+|----------|---------|-------------|
+| `capture_and_analyze_frame` | "look at...", "do you see...", "describe..." | Runs latest frame through two-pass vision pipeline |
+| `get_session_context` | "what objects are assigned?", "what's the current diagram?" | Returns proxies, Mermaid state, transcript from Redis |
+| `set_proxy_object` | "this stapler is a load balancer" | Registers proxy in Redis, notifies client |
+
+### Audit Trail
+All function calls are logged to Redis:
+- `tool_call` event: function name, arguments, call_id, timestamp
+- `tool_response` event: function name, status, latency_ms, call_id
+- Client sees `TOOL: capture_and_analyze_frame ✓ (450ms)` in the connection log
+
+## 3. "Imagine" Mode: Proxy Object Registry (Live Stream)
+This workflow handles real-time voice-to-state object assignments. Voice input is supported from both the **Web UI** (browser microphone via Web Audio API) and the **Python client** (`client_streamer.py` via PyAudio). Proxy objects can also be registered via Gemini function calling (`set_proxy_object`).
 
 ### Browser Voice Flow
 ```mermaid
@@ -78,8 +118,8 @@ sequenceDiagram
     Mic->>Browser: PCM16 @ 16kHz (ScriptProcessorNode)
     Browser->>Server: Binary Audio Frames (Int16Array)
     Server->>GeminiLive: Forward Audio Bytes
-    GeminiLive-->>Server: Text Response + Audio Response
-    Server-->>Browser: Text (JSON) + Audio (PCM16 Binary)
+    GeminiLive-->>Server: Audio Response + Transcriptions + Tool Calls
+    Server-->>Browser: Text (JSON) + Audio (PCM16 Binary) + Tool Activity
     Browser->>Speaker: AudioContext playback (24kHz)
 ```
 
@@ -93,13 +133,14 @@ sequenceDiagram
 
     Client->>Server: Binary Audio ("This stapler is a GPU")
     Server->>GeminiLive: Forward Audio Bytes
-    GeminiLive-->>Server: Text Intent ("Acknowledge proxy assignment")
-    GeminiLive-->>Client: Audio Response ("Understood, Stapler is now a GPU")
+    GeminiLive-->>Server: tool_call: set_proxy_object("stapler", "GPU cluster")
     Server->>Redis: set_object_proxy("stapler", "GPU cluster")
     Server->>Redis: log_event("proxy_assignment")
+    Server->>Redis: log_event("tool_call") + log_event("tool_response")
+    GeminiLive-->>Client: Audio Response ("Understood, Stapler is now a GPU cluster")
 ```
 
-## 3. Vision Mode Switching
+## 4. Vision Mode Switching
 
 Users can switch vision modes via three mechanisms:
 
@@ -111,11 +152,11 @@ Users can switch vision modes via three mechanisms:
 
 Supported modes: `auto`, `whiteboard`, `imagine`, `charades`
 
-## 4. Transcript Logging for Context Injection
+## 5. Transcript Logging for Context Injection
 
 Both user text messages and model text responses are logged as `voice_input` events in Redis during the WebSocket session. These events are retrieved by `get_recent_transcript()` and injected into the Charades mode prompt for gesture-voice cross-referencing.
 
-## 5. On-Demand Rendering Workflow
+## 6. On-Demand Rendering Workflow
 This workflow converts the persisted state into a high-fidelity visual output.
 
 ```mermaid
@@ -133,7 +174,7 @@ sequenceDiagram
     Server-->>User: Binary Image Response (image/png)
 ```
 
-## 6. Photorealistic Visualization Pipeline (Imagen + Veo 3)
+## 7. Photorealistic Visualization Pipeline (Imagen + Veo 3)
 
 This workflow transforms Mermaid diagrams into photorealistic images and animated videos.
 

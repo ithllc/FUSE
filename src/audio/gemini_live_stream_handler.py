@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import Optional
+from typing import Optional, List, Dict
 from google import genai
 from google.genai import types
 
@@ -19,11 +19,86 @@ MODE_KEYWORDS = {
     "auto mode": "auto",
 }
 
+# Function declarations for Live API tool use (issue #19)
+LIVE_TOOLS = [
+    {
+        "function_declarations": [
+            {
+                "name": "capture_and_analyze_frame",
+                "description": (
+                    "Captures the latest camera frame and analyzes it through the "
+                    "vision pipeline. Use this when the user asks you to look at, "
+                    "describe, or analyze what the camera sees (e.g., 'do you see "
+                    "the whiteboard?', 'what objects are on the table?', 'look at "
+                    "this sketch'). Returns the scene type, any extracted Mermaid "
+                    "diagram code, and a description of what was found."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": ["auto", "whiteboard", "imagine", "charades"],
+                            "description": (
+                                "Vision processing mode. Use 'whiteboard' when the "
+                                "user mentions a whiteboard or sketch. Use 'imagine' "
+                                "when the user asks about physical objects on a table. "
+                                "Use 'charades' when the user is gesturing. Use 'auto' "
+                                "to let the system detect the scene type automatically."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "get_session_context",
+                "description": (
+                    "Retrieves the current session state including proxy object "
+                    "assignments, the current architecture diagram, and recent "
+                    "transcript history. Use this when you need to recall what "
+                    "objects have been assigned, what the current architecture "
+                    "looks like, or what was discussed recently."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+            {
+                "name": "set_proxy_object",
+                "description": (
+                    "Registers a physical object as a proxy for an architecture "
+                    "component. Use this when the user assigns a role to an object "
+                    "(e.g., 'this stapler is our load balancer', 'the cup is the "
+                    "database'). This updates the proxy registry used by the vision "
+                    "pipeline."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "object_name": {
+                            "type": "string",
+                            "description": "The physical object being assigned (e.g., 'stapler', 'cup', 'phone').",
+                        },
+                        "technical_role": {
+                            "type": "string",
+                            "description": "The architecture component it represents (e.g., 'load balancer', 'database', 'API gateway').",
+                        },
+                    },
+                    "required": ["object_name", "technical_role"],
+                },
+            },
+        ]
+    }
+]
+
 
 class GeminiLiveStreamHandler:
     """
-    Interleaves audio transcripts with vision frame metadata using Gemini 3.1 Flash Live.
-    Designed for real-time gesture tracking and multimodal technical intent detection.
+    Handles bidirectional audio streaming via Gemini Live API with function calling
+    for on-demand vision capture. Designed for real-time gesture tracking and
+    multimodal technical intent detection.
     """
     def __init__(self, project_id: str, state_manager: SessionStateManager, location: str = "global"):
         self.project_id = project_id
@@ -62,13 +137,15 @@ class GeminiLiveStreamHandler:
             context_window_compression=types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow(),
             ),
+            # Function calling tools for on-demand vision capture (issue #19)
+            tools=LIVE_TOOLS,
             system_instruction=types.Content(
                 parts=[
                     types.Part.from_text(
                         text=(
                             "You are FUSE, the Collaborative Brainstorming Intelligence. "
                             "You are an expert system architect and facilitator. "
-                            "You use vision and audio to help users design complex systems. "
+                            "You help users design complex systems using voice and vision. "
                             "IMPORTANT: When the session begins, immediately greet the user by saying: "
                             "'Hello! I am FUSE, your brainstorming assistant. "
                             "Let me run a quick check. Please say a few words to test your microphone.' "
@@ -76,11 +153,20 @@ class GeminiLiveStreamHandler:
                             "When you hear the user speak, respond with: "
                             "'I can hear you clearly. Let us begin your brainstorming session.' "
                             "After this initial greeting and mic check, proceed normally. "
-                            "When a user assigns a role to an object (e.g., 'This stapler is a GPU'), "
-                            "acknowledge it and maintain context. "
-                            "If you see a technical sketch, you'll help extract it into Mermaid.js. "
-                            "Interrupt only if you detect a logical architecture violation or "
-                            "if the user asks for a validation check. "
+                            "\n\n"
+                            "VISION CAPABILITIES: You have access to a camera through the "
+                            "capture_and_analyze_frame function. When a user asks you to look at "
+                            "something, see the whiteboard, describe objects, or analyze what's in "
+                            "front of them, call this function to capture and analyze the current "
+                            "camera frame. Describe what the vision system found in your audio response. "
+                            "\n\n"
+                            "PROXY OBJECTS: When a user assigns a role to a physical object "
+                            "(e.g., 'This stapler is a GPU'), call set_proxy_object to register it. "
+                            "You can also call get_session_context to recall all current assignments "
+                            "and the architecture diagram state. "
+                            "\n\n"
+                            "When you detect a logical architecture violation or the user asks for "
+                            "a validation check, let them know. "
                             "When a user requests a mode switch (e.g., 'switch to whiteboard mode'), "
                             "acknowledge the switch."
                         )
