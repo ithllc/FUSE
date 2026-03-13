@@ -27,8 +27,12 @@ FUSE is a multimodal AI brainstorming partner that sees, hears, and collaborates
 - **Live Whiteboard Extraction** — Camera captures whiteboard sketches and FUSE converts them into structured Mermaid.js diagrams using Gemini 3.1 Flash Lite
 - **Real-Time Voice Conversation** — Bidirectional voice streaming with Gemini 2.5 Flash Native Audio for natural, hands-free interaction
 - **"Imagine" Mode** — Use everyday objects (coffee mug, stapler, notebook) as physical proxies for technical components. Say "Imagine this mug is a database" and FUSE tracks it in the architecture
+- **"Charades" Mode** — Use hand gestures and body positioning to describe architecture topologies while narrating verbally
 - **Automated Architecture Validation** — Gemini 3.1 Pro continuously checks designs for bottlenecks, single points of failure, and logical inconsistencies
 - **Live Diagram Rendering** — Mermaid.js diagrams rendered in real-time as the architecture evolves
+- **Photorealistic Visualization** — Imagen 4.0 transforms Mermaid diagrams into photorealistic CGI renders of infrastructure
+- **Animated Walkthroughs** — Veo 3.0 generates cinematic data-flow animations from the realistic images
+- **Auto-Workflow** — After a diagram is created, FUSE automatically validates, visualizes, and animates — each output appears in its own tab as it completes
 
 ---
 
@@ -37,14 +41,20 @@ FUSE is a multimodal AI brainstorming partner that sees, hears, and collaborates
 ```
 Browser / Python Client
     │
-    ├── WebSocket /live ──────────► Gemini Live API (Voice)
+    ├── WebSocket /live ──────────► Gemini Live API (Voice + Function Calling)
     │                                 gemini-2.5-flash-native-audio
     │
-    ├── POST /vision/frame ───────► VisionStateCapture
+    ├── POST /vision/frame ───────► VisionStateCapture (Two-Pass Pipeline)
     │                                 gemini-3.1-flash-lite-preview
     │
-    └── GET /validate ────────────► ProofOrchestrator
-                                     gemini-3.1-pro-preview
+    ├── GET /validate ────────────► ProofOrchestrator
+    │                                 gemini-3.1-pro-preview
+    │
+    ├── GET /render/realistic ────► ImagenDiagramVisualizer
+    │                                 imagen-4.0-generate-001
+    │
+    └── GET /render/animate ──────► Veo3DiagramAnimator
+                                     veo-3.0-generate-preview
                                           │
                                      Redis (State)
                                           │
@@ -56,11 +66,14 @@ Browser / Python Client
 
 | Component | Model | Purpose |
 |-----------|-------|---------|
-| GeminiLiveStreamHandler | `gemini-2.5-flash-native-audio` | Bidirectional voice streaming |
-| VisionStateCapture | `gemini-3.1-flash-lite-preview` | Whiteboard OCR and diagram extraction |
+| GeminiLiveStreamHandler | `gemini-2.5-flash-native-audio` | Bidirectional voice streaming with function calling |
+| VisionStateCapture | `gemini-3.1-flash-lite-preview` | Two-pass whiteboard/object/gesture extraction |
 | ProofOrchestrator | `gemini-3.1-pro-preview` | Architecture validation and reasoning |
 | SessionStateManager | — | Redis-backed session persistence |
 | DiagramRenderer | — | Mermaid CLI to PNG conversion |
+| ImagenDiagramVisualizer | `imagen-4.0-generate-001` | Photorealistic architecture image generation |
+| Veo3DiagramAnimator | `veo-3.0-generate-preview` | Animated data-flow walkthrough videos |
+| MermaidSceneTranslator | — | Mermaid AST to visual scene description (70+ mappings) |
 
 ---
 
@@ -69,7 +82,7 @@ Browser / Python Client
 | Layer | Technology |
 |-------|-----------|
 | **Backend** | Python 3.11, FastAPI, Uvicorn |
-| **AI Models** | Google Gemini (Vertex AI) — 3 specialized models |
+| **AI Models** | Google Gemini (Vertex AI) — 5 specialized models + Imagen 4.0 + Veo 3.0 |
 | **State** | Google Cloud Memorystore (Redis) |
 | **Diagrams** | Mermaid.js + mermaid-cli (Node.js) |
 | **Deployment** | Google Cloud Run, Artifact Registry, Cloud Build |
@@ -133,13 +146,18 @@ The build pipeline:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Web UI |
-| `/live` | WebSocket | Bidirectional voice/vision streaming |
-| `/vision/frame` | POST | Submit camera frame for analysis |
+| `/live` | WebSocket | Bidirectional voice/vision streaming with function calling |
+| `/vision/frame` | POST | Submit camera frame for analysis (supports `?mode=` override) |
+| `/vision/mode` | GET/POST | Get or set vision mode (`auto`, `whiteboard`, `imagine`, `charades`) |
 | `/state/mermaid` | GET | Current architecture state (Mermaid code) |
 | `/render` | GET | Render architecture to PNG |
-| `/validate` | GET | Run architecture validation |
+| `/render/realistic` | GET | Generate photorealistic image via Imagen 4.0 |
+| `/render/animate` | GET | Generate animated walkthrough via Veo 3.0 |
+| `/render/visualize` | GET | Full pipeline: image + video (returns base64 JSON) |
+| `/validate` | GET | Run architecture validation via Gemini 3.1 Pro |
 | `/command` | POST | Submit text command |
-| `/health` | GET | Health check |
+| `/health` | GET | Deep health check with component status |
+| `/healthz` | GET | Lightweight liveness probe |
 
 ---
 
@@ -160,10 +178,15 @@ FUSE/
 │   ├── agents/
 │   │   └── proof_orchestrator.py           # Architecture validation
 │   └── output/
-│       └── diagram_renderer.py             # Mermaid CLI rendering
+│       ├── diagram_renderer.py             # Mermaid CLI rendering
+│       ├── imagen_diagram_visualizer.py    # Photorealistic image generation (Imagen 4.0)
+│       ├── veo3_diagram_animator.py        # Animated walkthrough generation (Veo 3.0)
+│       └── mermaid_scene_translator.py     # Mermaid AST to visual scene descriptions
 ├── tests/
 │   ├── test_vision_state.py
-│   └── test_audio_proxy.py
+│   ├── test_audio_proxy.py
+│   ├── generate_hrm_test_image.py          # Generates test image with 6 architecture shapes
+│   └── test_vision_pipeline_e2e.py         # E2E test: frame → diagram → validate → visualize → animate
 ├── docs/
 │   ├── how_to/                      # Usage guides
 │   ├── architecture/                # System design documentation
@@ -185,6 +208,8 @@ FUSE/
 - **[Multimodal Workflows](docs/architecture/MULTIMODAL_WORKFLOWS.md)** — Vision, voice, and rendering pipelines
 - **[Product Requirements](docs/coding_implementations/FUSE_PRD.md)** — Feature pillars and success metrics
 - **[Technical Guide](docs/coding_implementations/FUSE_TECHNICAL_INSTALLATION_GUIDE.md)** — Phase-by-phase implementation
+- **[Imagen/Veo3 Visualization](docs/coding_implementations/IMAGEN_VEO3_DIAGRAM_VISUALIZATION.md)** — Photorealistic rendering and animation pipeline
+- **[UX Workflow Analysis](docs/UX_WORKFLOW_ANALYSIS.md)** — Auto-workflow design and tab progression
 - **[Errors & Fixes](docs/ERRORS_AND_FIXES.md)** — Resolved issues and lessons learned
 
 ---
@@ -197,16 +222,18 @@ The four-panel interface provides simultaneous access to:
 
 | Panel | Function |
 |-------|----------|
-| **Top-Left** | Live camera feed with frame capture |
-| **Top-Right** | Real-time Mermaid.js architecture diagram |
+| **Top-Left** | Live camera feed with vision mode selector and frame capture |
+| **Top-Right** | Architecture output with 4 tabs: Diagram, Validation, Visualized Image, Animated Video |
 | **Bottom-Left** | Chat transcript + proxy object registry |
-| **Bottom-Right** | Architecture validation reports |
+| **Bottom-Right** | System status panel with component health and connection log |
+
+The right panel tabs activate progressively as the auto-workflow completes each step — providing real-time visibility into system processing.
 
 ### Voice Interaction
 
-1. Click **Connect Live** to establish the WebSocket session
-2. Click **Start Mic** to begin voice streaming
-3. Speak naturally — FUSE responds with audio and updates diagrams in real time
+1. Click **Start Session** to connect and run pre-session diagnostics (mic, audio, camera)
+2. After diagnostics pass, speak naturally — FUSE responds with audio and updates diagrams in real time
+3. As diagrams are created, the system auto-validates, generates a photorealistic image, and creates an animated walkthrough — each appearing in its own tab
 
 ### Imagine Mode
 
@@ -214,6 +241,25 @@ Hold a physical object to the camera and say:
 > "Imagine this coffee mug is the primary database server."
 
 FUSE registers the proxy object and tracks it in the architecture diagram.
+
+---
+
+## Automated Testing
+
+FUSE includes an E2E test suite for the vision pipeline:
+
+```bash
+# Generate a test image with 6 architecture shapes
+python tests/generate_hrm_test_image.py
+
+# Run the full pipeline test against Cloud Run (or local)
+python tests/test_vision_pipeline_e2e.py
+
+# Override target URL for local testing
+FUSE_URL=http://localhost:8080 python tests/test_vision_pipeline_e2e.py
+```
+
+The test sends a shapes-only image through: `POST /vision/frame` → `GET /state/mermaid` → `GET /validate` → `GET /render/realistic` → `GET /render/animate`, saving all outputs to `tests/outputs/`.
 
 ---
 

@@ -58,7 +58,7 @@ graph TD
 | **DiagramRenderer** | Automated PNG generation for session output. | Mermaid CLI (`mmdc`) |
 | **ImagenDiagramVisualizer** | Generates photorealistic images from Mermaid diagrams via scene description translation. | `imagen-4.0-generate-001` |
 | **MermaidSceneTranslator** | Parses Mermaid AST and converts nodes/edges into natural-language visual scene descriptions. | Prompt templates |
-| **Veo3DiagramAnimator** | Animates photorealistic architecture images into short walkthrough videos. | `veo-3.0-generate-preview` |
+| **Veo3DiagramAnimator** | Animates photorealistic architecture images into short walkthrough videos. Uses non-blocking `asyncio.sleep` for polling and `person_generation="allow_adult"` to accommodate human-like figures in Imagen output. | `veo-3.0-generate-preview` |
 
 ## 3. Vision Pipeline Detail
 
@@ -129,8 +129,30 @@ The `/live` WebSocket handler includes session resilience features:
 - **Context Window Compression**: `SlidingWindow` compression prevents the 128k token limit from being reached, removing the ~15-minute session cap.
 - **Reconnect Loop**: When `session.receive()` ends or GoAway fires, the handler reconnects transparently (up to 10 retries) while keeping the client WebSocket open.
 - **GoAway Handling**: Detects server shutdown warnings and triggers proactive reconnect.
+- **Keepalive Ping (Issue #20)**: A dedicated `keepalive_ping()` async task sends `{"type": "ping", "ts": <timestamp>}` to the client WebSocket every 15 seconds. This prevents Cloud Run's HTTP/2 load balancer from killing the connection during idle periods caused by Gemini reconnects or long-running function calls. The ping task runs alongside `receive_from_client()` and `send_to_client()` and survives Gemini session transitions. The client silently consumes ping messages without UI output.
 
-## 8. UAT Observability
+## 8. Auto-Workflow Progression and Output Tabs
+
+The Web UI includes an automated workflow that chains processing steps after a diagram is created:
+
+```
+Diagram updated → (5s debounce) → Validate → Visualize (Imagen) → Animate (Veo 3)
+```
+
+### Output Tabs
+
+The right panel has four tabs:
+
+| Tab | Initial State | Activates When |
+|-----|---------------|----------------|
+| **Architecture Diagram** | Active (default) | Always available |
+| **Validation** | Enabled, empty | Validation completes |
+| **Visualized Image** | Disabled (grayed) | Imagen returns image |
+| **Animated Video** | Disabled (grayed) | Veo3 returns video |
+
+Tab states: `disabled` → `processing` (spinner) → `ready` (glow animation) → normal. Each step logs `WORKFLOW:` entries to the connection log for real-time visibility.
+
+## 9. UAT Observability
 
 FUSE includes a lightweight observability layer for user acceptance testing and demo debugging:
 

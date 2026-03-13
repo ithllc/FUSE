@@ -317,6 +317,14 @@
             color: #58a6ff;
             border-bottom-color: #58a6ff;
         }
+        .tab.disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+        .tab.processing { opacity: 0.7; pointer-events: none; }
+        .tab.processing::after { content: ' ⏳'; }
+        .tab.ready { animation: tab-glow 2.5s ease-out; }
+        @keyframes tab-glow {
+            0% { color: #58a6ff; text-shadow: 0 0 8px rgba(88,166,255,0.6); }
+            100% { color: #8b949e; text-shadow: none; }
+        }
         .tab-content { display: none; height: 100%; }
         .tab-content.active { display: flex; flex-direction: column; }
 
@@ -763,6 +771,8 @@
                 <div class="tabs">
                     <div class="tab active" onclick="switchArchTab('diagram')">Architecture Diagram</div>
                     <div class="tab" onclick="switchArchTab('validation')">Validation</div>
+                    <div class="tab disabled" id="tabVisualizedImage" onclick="switchArchTab('visualized')">Visualized Image</div>
+                    <div class="tab disabled" id="tabAnimatedVideo" onclick="switchArchTab('animated')">Animated Video</div>
                 </div>
                 <div class="btn-group">
                     <button class="btn btn-sm btn-blue" id="btnVisualize" onclick="generateRealistic()">Visualize</button>
@@ -802,6 +812,22 @@
 Click "Validate Diagram" to analyze the current architecture for logical inconsistencies, bottlenecks, or single points of failure.
 
 Powered by Gemini 3.1 Pro Preview.</div>
+                </div>
+                <!-- Visualized Image view -->
+                <div class="tab-content" id="arch-visualized">
+                    <div id="visualizedPlaceholder" style="text-align:center; padding:32px; color:#484f58;">
+                        <div class="spinner" id="visualizedSpinner" style="display:none;"></div>
+                        <p id="visualizedStatus">Waiting for diagram to generate a photorealistic image...</p>
+                    </div>
+                    <img id="visualizedImage" style="max-width:100%; border-radius:8px; display:none;" />
+                </div>
+                <!-- Animated Video view -->
+                <div class="tab-content" id="arch-animated">
+                    <div id="animatedPlaceholder" style="text-align:center; padding:32px; color:#484f58;">
+                        <div class="spinner" id="animatedSpinner" style="display:none;"></div>
+                        <p id="animatedStatus">Waiting for visualization to generate an animated walkthrough...</p>
+                    </div>
+                    <video id="animatedVideo" controls style="max-width:100%; border-radius:8px; display:none;"></video>
                 </div>
             </div>
         </div>
@@ -1009,6 +1035,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 if (typeof event.data === 'string') {
                     try {
                         const data = JSON.parse(event.data);
+
+                        // Handle keepalive pings from server (issue #20)
+                        if (data.type === 'ping') {
+                            return;
+                        }
 
                         // Handle structured status messages
                         if (data.type === 'status') {
@@ -1406,9 +1437,16 @@ Powered by Gemini 3.1 Pro Preview.</div>
             }
         }
 
+        let autoWorkflowDebounce = null;
         function checkForMermaid(text) {
             if (text.includes('graph ') || text.includes('flowchart ') || text.includes('sequenceDiagram')) {
                 renderMermaid(text);
+                addConnectionLog('WORKFLOW: Architecture diagram updated (' + text.length + ' chars)', 'ok');
+                // Debounce auto-workflow: wait 5s after last diagram update before triggering
+                if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
+                autoWorkflowDebounce = setTimeout(() => {
+                    if (sessionState === 'active') runAutoWorkflow();
+                }, 5000);
             }
         }
 
@@ -1417,6 +1455,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
             const report = document.getElementById('validationReport');
             report.textContent = 'Running validation with Gemini 3.1 Pro Preview...';
             report.className = 'report-content';
+            addConnectionLog('WORKFLOW: Validating architecture...', 'info');
 
             try {
                 const resp = await fetch(BASE + '/validate');
@@ -1424,11 +1463,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 if (data.status === 'success') {
                     report.textContent = data.validation_report;
                     report.className = 'report-content ' + (data.is_valid ? 'report-valid' : 'report-invalid');
+                    const issueCount = (data.validation_report.match(/###/g) || []).length;
+                    addConnectionLog('WORKFLOW: Validation complete — ' + (data.is_valid ? 'valid' : issueCount + ' issues found'), data.is_valid ? 'ok' : 'error');
                 } else {
                     report.textContent = data.message || 'Validation unavailable.';
+                    addConnectionLog('WORKFLOW: Validation unavailable — ' + (data.message || 'no data'), 'error');
                 }
             } catch (e) {
                 report.textContent = 'Validation error: ' + e.message;
+                addConnectionLog('WORKFLOW: Validation failed — ' + e.message, 'error');
             }
         }
 
@@ -1563,7 +1606,33 @@ Powered by Gemini 3.1 Pro Preview.</div>
             document.getElementById('genProgress').style.display = 'none';
         }
 
+        // --- Tab activation helpers (issue #20 UX) ---
+        function activateArchTab(tabId) {
+            const tab = document.getElementById(tabId);
+            if (!tab) return;
+            tab.classList.remove('disabled', 'processing');
+            tab.style.pointerEvents = '';
+            tab.classList.add('ready');
+            // Remove glow after animation
+            setTimeout(() => tab.classList.remove('ready'), 2500);
+        }
+
+        function setTabProcessing(tabId) {
+            const tab = document.getElementById(tabId);
+            if (!tab) return;
+            tab.classList.remove('disabled', 'ready');
+            tab.classList.add('processing');
+            tab.style.pointerEvents = 'none';
+        }
+
         async function generateRealistic() {
+            addConnectionLog('WORKFLOW: Generating photorealistic image (Imagen 4.0)...', 'info');
+            setTabProcessing('tabVisualizedImage');
+            // Show spinner in the visualized tab
+            document.getElementById('visualizedSpinner').style.display = 'block';
+            document.getElementById('visualizedStatus').textContent = 'Generating photorealistic image with Imagen 4.0...';
+            document.getElementById('visualizedImage').style.display = 'none';
+            // Also show in legacy view for backwards compatibility
             showGenProgress('Generating photorealistic image with Imagen (10-30s)...');
             addMsg('system', 'Generating photorealistic visualization...');
             try {
@@ -1571,25 +1640,50 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 if (resp.headers.get('content-type')?.includes('image/png')) {
                     const blob = await resp.blob();
                     const url = URL.createObjectURL(blob);
+                    // New tab view
+                    const tabImg = document.getElementById('visualizedImage');
+                    tabImg.src = url;
+                    tabImg.style.display = 'block';
+                    document.getElementById('visualizedPlaceholder').style.display = 'none';
+                    activateArchTab('tabVisualizedImage');
+                    // Legacy view
                     const img = document.getElementById('realisticImage');
                     img.src = url;
                     img.style.display = 'block';
                     hideGenProgress();
+                    const sizeMB = (blob.size / 1048576).toFixed(1);
+                    addConnectionLog('WORKFLOW: Image generated (' + sizeMB + ' MB) ✓', 'ok');
                     addMsg('system', 'Realistic visualization generated.');
+                    return true;
                 } else {
                     const data = await resp.json();
                     hideGenProgress();
+                    document.getElementById('visualizedSpinner').style.display = 'none';
+                    document.getElementById('visualizedStatus').textContent = 'Visualization failed: ' + (data.message || 'Unknown error.');
+                    addConnectionLog('WORKFLOW: Image generation failed — ' + (data.message || 'Unknown error'), 'error');
                     addMsg('system', 'Visualization error: ' + (data.message || 'Unknown error.'));
                     toggleDiagramView();
+                    return false;
                 }
             } catch (e) {
                 hideGenProgress();
+                document.getElementById('visualizedSpinner').style.display = 'none';
+                document.getElementById('visualizedStatus').textContent = 'Visualization failed: ' + e.message;
+                addConnectionLog('WORKFLOW: Image generation failed — ' + e.message, 'error');
                 addMsg('system', 'Visualization failed: ' + e.message);
                 toggleDiagramView();
+                return false;
             }
         }
 
         async function generateAnimation() {
+            addConnectionLog('WORKFLOW: Generating animated walkthrough (Veo 3.0)...', 'info');
+            setTabProcessing('tabAnimatedVideo');
+            // Show spinner in the animated tab
+            document.getElementById('animatedSpinner').style.display = 'block';
+            document.getElementById('animatedStatus').textContent = 'Generating animated walkthrough with Veo 3.0...';
+            document.getElementById('animatedVideo').style.display = 'none';
+            // Legacy view
             showGenProgress('Generating animated walkthrough with Veo 3 (30-120s)...');
             addMsg('system', 'Generating animated walkthrough...');
             try {
@@ -1597,22 +1691,64 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 if (resp.headers.get('content-type')?.includes('video/mp4')) {
                     const blob = await resp.blob();
                     const url = URL.createObjectURL(blob);
+                    // New tab view
+                    const tabVideo = document.getElementById('animatedVideo');
+                    tabVideo.src = url;
+                    tabVideo.style.display = 'block';
+                    document.getElementById('animatedPlaceholder').style.display = 'none';
+                    activateArchTab('tabAnimatedVideo');
+                    // Legacy view
                     const video = document.getElementById('realisticVideo');
                     video.src = url;
                     video.style.display = 'block';
                     document.getElementById('realisticImage').style.display = 'none';
                     hideGenProgress();
+                    const sizeMB = (blob.size / 1048576).toFixed(1);
+                    addConnectionLog('WORKFLOW: Animation generated (' + sizeMB + ' MB) ✓', 'ok');
                     addMsg('system', 'Animated walkthrough generated.');
+                    return true;
                 } else {
                     const data = await resp.json();
                     hideGenProgress();
+                    document.getElementById('animatedSpinner').style.display = 'none';
+                    document.getElementById('animatedStatus').textContent = 'Animation failed: ' + (data.message || 'Unknown error.');
+                    addConnectionLog('WORKFLOW: Animation failed — ' + (data.message || 'Unknown error'), 'error');
                     addMsg('system', 'Animation error: ' + (data.message || 'Unknown error.'));
                     toggleDiagramView();
+                    return false;
                 }
             } catch (e) {
                 hideGenProgress();
+                document.getElementById('animatedSpinner').style.display = 'none';
+                document.getElementById('animatedStatus').textContent = 'Animation failed: ' + e.message;
+                addConnectionLog('WORKFLOW: Animation failed — ' + e.message, 'error');
                 addMsg('system', 'Animation failed: ' + e.message);
                 toggleDiagramView();
+                return false;
+            }
+        }
+
+        // --- Auto-workflow: triggered after diagram update ---
+        let autoWorkflowRunning = false;
+        async function runAutoWorkflow() {
+            if (autoWorkflowRunning) return;
+            autoWorkflowRunning = true;
+            addConnectionLog('WORKFLOW: Auto-workflow started (validate → visualize → animate)', 'info');
+            try {
+                // Step 1: Validate
+                addConnectionLog('WORKFLOW: Validating architecture...', 'info');
+                await runValidation();
+                // Step 2: Visualize
+                const imgOk = await generateRealistic();
+                // Step 3: Animate (only if image succeeded)
+                if (imgOk) {
+                    await generateAnimation();
+                }
+                addConnectionLog('WORKFLOW: Auto-workflow complete', 'ok');
+            } catch (e) {
+                addConnectionLog('WORKFLOW: Auto-workflow error — ' + e.message, 'error');
+            } finally {
+                autoWorkflowRunning = false;
             }
         }
 

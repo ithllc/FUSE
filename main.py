@@ -255,6 +255,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Flag set by GoAway handler to trigger clean reconnect
                     needs_reconnect = False
 
+                    async def keepalive_ping():
+                        """Send periodic keepalive pings to prevent Cloud Run LB timeout (issue #20)."""
+                        try:
+                            while session_active and client_connected:
+                                await asyncio.sleep(15)
+                                if session_active and client_connected:
+                                    try:
+                                        await websocket.send_text(json.dumps({"type": "ping", "ts": int(time.time())}))
+                                    except Exception:
+                                        break
+                        except asyncio.CancelledError:
+                            pass
+
                     async def _execute_tool_call(fc) -> dict:
                         """Execute a function call from Gemini and return the result.
 
@@ -506,10 +519,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         finally:
                             session_active = False
 
-                    # Run both tasks; when either finishes, cancel the other
+                    # Run all three tasks; when send or receive finishes, cancel the others
                     tasks = [
                         asyncio.create_task(receive_from_client()),
                         asyncio.create_task(send_to_client()),
+                        asyncio.create_task(keepalive_ping()),
                     ]
 
                     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

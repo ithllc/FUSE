@@ -1,6 +1,7 @@
 """Animates a photorealistic architecture image into a short walkthrough
 video using Google Veo 3 via Vertex AI."""
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -130,18 +131,18 @@ class Veo3DiagramAnimator:
                     aspect_ratio="16:9",
                     number_of_videos=1,
                     duration_seconds=duration_seconds,
-                    person_generation="dont_allow",
+                    person_generation="allow_adult",
                 ),
             )
 
-            # Poll until complete or timeout
+            # Poll until complete or timeout (use asyncio.sleep to avoid blocking event loop)
             logger.info("Veo3 generation started. Polling for completion...")
             elapsed = 0
             while not operation.done:
                 if elapsed >= VEO3_POLL_TIMEOUT_SECONDS:
                     logger.error("Veo3 polling timed out after %ds", elapsed)
                     return None
-                time.sleep(VEO3_POLL_INTERVAL_SECONDS)
+                await asyncio.sleep(VEO3_POLL_INTERVAL_SECONDS)
                 elapsed += VEO3_POLL_INTERVAL_SECONDS
                 operation = self.client.operations.get(operation)
 

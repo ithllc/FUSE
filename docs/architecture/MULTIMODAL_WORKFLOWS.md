@@ -222,3 +222,49 @@ The `MermaidSceneTranslator` converts Mermaid syntax into visual scene descripti
 | Imagen in-memory | 5 min | SHA-256 of Mermaid code |
 | Veo 3 in-memory | 10 min | SHA-256 of image bytes |
 | Disk persistence | Until cleanup | `output/visualizations/`, `output/animations/` |
+
+### Veo 3 Configuration Notes
+
+- **`person_generation="allow_adult"`**: Required because Imagen output frequently includes human-like silhouettes in architecture scenes. The previous `"dont_allow"` setting caused Veo3 to return empty `generated_videos` arrays with no error, silently filtering out valid results.
+- **Non-blocking polling**: The Veo3 animator uses `await asyncio.sleep()` instead of blocking `time.sleep()` in its polling loop to avoid blocking the FastAPI event loop during the 30-180 second generation window.
+
+## 8. Auto-Workflow: Diagram → Validate → Visualize → Animate
+
+When a diagram is created or updated via the vision pipeline, the Web UI automatically chains all downstream processing steps:
+
+```mermaid
+sequenceDiagram
+    participant UI as Web UI
+    participant Log as Connection Log
+    participant Server as FastAPI
+
+    Note over UI: Diagram updated (via vision or voice)
+    UI->>Log: WORKFLOW: Architecture diagram updated (342 chars)
+    Note over UI: 5-second debounce timer
+    UI->>Log: WORKFLOW: Validating architecture...
+    UI->>Server: GET /validate
+    Server-->>UI: Validation report
+    UI->>Log: WORKFLOW: Validation complete — 3 issues found
+    UI->>Log: WORKFLOW: Generating photorealistic image (Imagen 4.0)...
+    UI->>Server: GET /render/realistic
+    Server-->>UI: PNG image bytes
+    UI->>Log: WORKFLOW: Image generated (1.5 MB) ✓
+    Note over UI: "Visualized Image" tab activates with glow
+    UI->>Log: WORKFLOW: Generating animated walkthrough (Veo 3.0)...
+    UI->>Server: GET /render/animate
+    Server-->>UI: MP4 video bytes
+    UI->>Log: WORKFLOW: Animation generated (2.1 MB) ✓
+    Note over UI: "Animated Video" tab activates with glow
+```
+
+### Tab State Machine
+
+```
+disabled → processing → ready → active
+   │           │          │
+   └── Tab not yet usable  │
+               └── Spinner + "⏳"
+                          └── Glow animation (2.5s), then normal clickable tab
+```
+
+The auto-workflow uses a 5-second debounce to avoid re-triggering during rapid diagram updates. Manual buttons (Visualize, Animate, Validate) remain available for explicit re-generation.

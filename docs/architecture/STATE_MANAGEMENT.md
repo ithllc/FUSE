@@ -61,11 +61,15 @@ Event types:
 - `vision_update` — Frame processed, includes scene_type, confidence, latency
 - `proxy_assignment` — Physical object mapped to technical role
 - `voice_input` — User text or model text response (used for Charades transcript injection)
+- `gemini_output` — Model text response from Gemini Live
 - `mode_switch` — Vision mode changed via command
 - `validation` — Periodic or on-demand architecture validation result
 - `connection_error` — WebSocket/Gemini connection failure with stage, error_type, and detail
+- `gemini_goaway` — Gemini Live API GoAway signal received (triggers reconnect)
+- `tool_call` — Function call from Gemini Live (function name, arguments, call_id)
+- `tool_response` — Function call result returned to Gemini (function name, status, latency_ms, call_id)
 - `imagen_generation` — Imagen visualization event
-- `veo3_generation` — Veo3 animation event
+- `veo3_animation` — Veo3 animation event (image_hash, video_size, duration, output_path)
 
 ## 4. State Lifecycle
 1.  **Initialization**: The `SessionStateManager` clears or initializes the session on server startup.
