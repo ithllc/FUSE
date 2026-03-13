@@ -729,6 +729,10 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                         </svg>
                     </button>
+                    <!-- A/B test: Video-to-Gemini toggle (issue #26) -->
+                    <button class="media-btn active" id="btnVideoGemini" onclick="toggleVideoToGemini()" title="Toggle Video to Gemini (A/B Test)" style="font-size:10px; padding:4px 8px; min-width:auto;">
+                        V→AI
+                    </button>
                 </div>
             </div>
 
@@ -953,6 +957,30 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let sessionTimer = null;
         let countdownInterval = null;
 
+        // --- A/B test: Video-to-Gemini toggle (issue #26) ---
+        let videoToGeminiEnabled = true;
+
+        function toggleVideoToGemini() {
+            videoToGeminiEnabled = !videoToGeminiEnabled;
+            const btn = document.getElementById('btnVideoGemini');
+            if (videoToGeminiEnabled) {
+                btn.classList.add('active');
+                btn.textContent = 'V→AI';
+                btn.title = 'Video streaming to Gemini: ON (click to disable for A/B test)';
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = 'V⊘AI';
+                btn.title = 'Video streaming to Gemini: OFF — audio only (click to enable)';
+            }
+            // Send toggle command to server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'video_toggle', enabled: videoToGeminiEnabled }));
+            }
+            const mode = videoToGeminiEnabled ? 'ON (audio+video → Gemini)' : 'OFF (audio only → Gemini)';
+            addConnectionLog('A/B TEST: Video to Gemini ' + mode, 'info');
+            addMsg('system', 'A/B Test — Video to Gemini: ' + mode);
+        }
+
         // --- Latency instrumentation (issue #25) ---
         let latencyLastMicSendTs = 0;       // when browser last sent audio to server
         let latencyFirstResponseTs = 0;     // when browser got first audio back this exchange
@@ -1047,6 +1075,12 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
                         // Handle keepalive pings from server (issue #20)
                         if (data.type === 'ping') {
+                            return;
+                        }
+
+                        // Handle A/B test video toggle acknowledgment (issue #26)
+                        if (data.type === 'video_toggle_ack') {
+                            addConnectionLog('SERVER: ' + data.message, 'ok');
                             return;
                         }
 

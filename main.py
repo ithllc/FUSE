@@ -438,6 +438,10 @@ async def websocket_endpoint(websocket: WebSocket):
                                 if not session_active or not client_connected:
                                     break
 
+                                # A/B test toggle: skip sending video to Gemini when disabled (issue #26)
+                                if not _video_to_gemini_enabled:
+                                    continue
+
                                 frame = _latest_frame
                                 if frame is None:
                                     continue
@@ -469,6 +473,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         finally:
                             _video_streaming = False
                             logger.info(f"VIDEO: Streaming stopped ({_video_frames_sent} frames sent)")
+
+                    # A/B test: video-to-gemini toggle (issue #26)
+                    _video_to_gemini_enabled = True
 
                     # Latency instrumentation state (issue #25)
                     _latency_samples = []
@@ -502,6 +509,17 @@ async def websocket_endpoint(websocket: WebSocket):
                                     raw = message["text"]
                                     try:
                                         parsed = json.loads(raw)
+                                        # A/B test: handle video toggle command (issue #26)
+                                        if isinstance(parsed, dict) and parsed.get("type") == "video_toggle":
+                                            _video_to_gemini_enabled = parsed.get("enabled", True)
+                                            mode = "ON (audio+video)" if _video_to_gemini_enabled else "OFF (audio only)"
+                                            logger.info(f"A/B TEST: Video to Gemini {mode}")
+                                            await websocket.send_text(json.dumps({
+                                                "type": "video_toggle_ack",
+                                                "enabled": _video_to_gemini_enabled,
+                                                "message": f"Video streaming to Gemini: {mode}"
+                                            }))
+                                            continue
                                         text_val = parsed.get("text", raw) if isinstance(parsed, dict) else raw
                                     except (json.JSONDecodeError, TypeError):
                                         text_val = raw
