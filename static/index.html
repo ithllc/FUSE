@@ -953,6 +953,13 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let sessionTimer = null;
         let countdownInterval = null;
 
+        // --- Latency instrumentation (issue #25) ---
+        let latencyLastMicSendTs = 0;       // when browser last sent audio to server
+        let latencyFirstResponseTs = 0;     // when browser got first audio back this exchange
+        let latencyExchangeOpen = false;    // true between mic send and first audio response
+        let latencyClientSamples = [];      // recent client round-trip samples
+        let latencyAudioResponseCount = 0;  // total audio responses received
+
         // --- Pre-session diagnostics ---
         let diagChecks = { audioOutput: false, micInput: false, camera: false };
         let diagAudioChunks = 0;
@@ -1043,6 +1050,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
                             return;
                         }
 
+                        // Handle latency instrumentation from server (issue #25)
+                        if (data.type === 'latency') {
+                            addConnectionLog(
+                                'LATENCY #' + data.n + ' (server): recv→gemini ' + data.server_recv_to_gemini + 'ms | gemini_think ' + data.gemini_processing + 'ms | send→browser ' + data.server_to_client + 'ms | server_total ' + data.total_server + 'ms',
+                                'info'
+                            );
+                            return;
+                        }
+
                         // Handle video streaming status from server (issue #22)
                         if (data.type === 'video_status') {
                             if (data.frames_sent) {
@@ -1116,6 +1132,20 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 } else if (event.data instanceof ArrayBuffer) {
                     // Binary audio response from Gemini - play it back
                     playAudioResponse(event.data);
+
+                    // Latency instrumentation (issue #25)
+                    latencyAudioResponseCount++;
+                    if (latencyExchangeOpen && latencyLastMicSendTs > 0) {
+                        const rtt = Math.round(performance.now() - latencyLastMicSendTs);
+                        latencyClientSamples.push(rtt);
+                        if (latencyClientSamples.length > 50) latencyClientSamples.shift();
+                        latencyExchangeOpen = false;
+                        // Log first 3 exchanges, then every 10th
+                        if (latencyAudioResponseCount <= 3 || latencyAudioResponseCount % 10 === 0) {
+                            const avg = Math.round(latencyClientSamples.reduce((a,b) => a+b, 0) / latencyClientSamples.length);
+                            addConnectionLog('LATENCY #' + latencyAudioResponseCount + ': browser→server→gemini→browser ' + rtt + 'ms (avg ' + avg + 'ms, n=' + latencyClientSamples.length + ')', 'info');
+                        }
+                    }
 
                     // Diagnostic: any audio from Gemini = audio output works.
                     // Mic input is confirmed separately via input transcription.
@@ -1232,6 +1262,9 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                     }
                     ws.send(pcm16.buffer);
+                    // Latency instrumentation (issue #25)
+                    latencyLastMicSendTs = performance.now();
+                    if (!latencyExchangeOpen) latencyExchangeOpen = true;
                 };
 
                 source.connect(micProcessor);

@@ -470,8 +470,15 @@ async def websocket_endpoint(websocket: WebSocket):
                             _video_streaming = False
                             logger.info(f"VIDEO: Streaming stopped ({_video_frames_sent} frames sent)")
 
+                    # Latency instrumentation state (issue #25)
+                    _latency_samples = []
+                    _last_audio_recv_ts = 0.0  # when server last received audio from client
+                    _last_audio_to_gemini_ts = 0.0  # when server last sent audio to Gemini
+                    _audio_exchange_count = 0
+
                     async def receive_from_client():
                         nonlocal session_active, client_connected
+                        nonlocal _last_audio_recv_ts, _last_audio_to_gemini_ts
                         global _latest_frame
                         try:
                             while session_active:
@@ -484,11 +491,13 @@ async def websocket_endpoint(websocket: WebSocket):
                                         _latest_frame = raw[1:]
                                     else:
                                         # Audio frame — send to Gemini Live API
+                                        _last_audio_recv_ts = time.time()  # issue #25
                                         audio_blob = genai_types.Blob(
                                             data=raw,
                                             mime_type="audio/pcm;rate=16000"
                                         )
                                         await session.send_realtime_input(audio=audio_blob)
+                                        _last_audio_to_gemini_ts = time.time()  # issue #25
                                 elif "text" in message:
                                     raw = message["text"]
                                     try:
@@ -514,6 +523,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     async def send_to_client():
                         nonlocal session_active, needs_reconnect, resumption_handle
+                        nonlocal _last_audio_recv_ts, _last_audio_to_gemini_ts, _audio_exchange_count
                         try:
                             async for response in session.receive():
                                 if response is None:
@@ -590,11 +600,54 @@ async def websocket_endpoint(websocket: WebSocket):
                                                 if state_manager:
                                                     state_manager.log_event("gemini_output", {"text": part.text})
                                             if hasattr(part, 'inline_data') and part.inline_data:
+                                                # Latency instrumentation (issue #25)
+                                                t_gemini_resp = time.time()
                                                 await websocket.send_bytes(part.inline_data.data)
+                                                t_sent = time.time()
+                                                if _last_audio_recv_ts > 0:
+                                                    _audio_exchange_count += 1
+                                                    latency = {
+                                                        "server_recv_to_gemini": round((_last_audio_to_gemini_ts - _last_audio_recv_ts) * 1000),
+                                                        "gemini_processing": round((t_gemini_resp - _last_audio_to_gemini_ts) * 1000),
+                                                        "server_to_client": round((t_sent - t_gemini_resp) * 1000),
+                                                        "total_server": round((t_sent - _last_audio_recv_ts) * 1000),
+                                                    }
+                                                    # Send latency report every 10 audio exchanges
+                                                    if _audio_exchange_count % 10 == 1 or _audio_exchange_count <= 3:
+                                                        try:
+                                                            await websocket.send_text(json.dumps({
+                                                                "type": "latency",
+                                                                "hop": "server",
+                                                                "n": _audio_exchange_count,
+                                                                **latency,
+                                                            }))
+                                                        except Exception:
+                                                            pass
                                 if hasattr(response, 'text') and response.text:
                                     await websocket.send_text(json.dumps({"text": response.text}))
                                 if hasattr(response, 'data') and response.data:
+                                    # Latency instrumentation (issue #25)
+                                    t_gemini_resp = time.time()
                                     await websocket.send_bytes(response.data)
+                                    t_sent = time.time()
+                                    if _last_audio_recv_ts > 0:
+                                        _audio_exchange_count += 1
+                                        latency = {
+                                            "server_recv_to_gemini": round((_last_audio_to_gemini_ts - _last_audio_recv_ts) * 1000),
+                                            "gemini_processing": round((t_gemini_resp - _last_audio_to_gemini_ts) * 1000),
+                                            "server_to_client": round((t_sent - t_gemini_resp) * 1000),
+                                            "total_server": round((t_sent - _last_audio_recv_ts) * 1000),
+                                        }
+                                        if _audio_exchange_count % 10 == 1 or _audio_exchange_count <= 3:
+                                            try:
+                                                await websocket.send_text(json.dumps({
+                                                    "type": "latency",
+                                                    "hop": "server",
+                                                    "n": _audio_exchange_count,
+                                                    **latency,
+                                                }))
+                                            except Exception:
+                                                pass
                         except Exception as e:
                             error_str = str(e)
                             if "1000" in error_str:
