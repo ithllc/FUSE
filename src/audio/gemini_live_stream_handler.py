@@ -112,8 +112,10 @@ class GeminiLiveStreamHandler:
             location=live_location,
             http_options={"api_version": "v1beta1"}
         )
-        # Vertex AI Live API model (GA)
-        self.model_id = "gemini-live-2.5-flash-native-audio"
+        # Vertex AI Live API model — preview for latency testing (issue #27)
+        # GA: "gemini-live-2.5-flash-native-audio"
+        # Preview (deprecates March 19, 2026): "gemini-live-2.5-flash-preview-native-audio-09-2025"
+        self.model_id = "gemini-live-2.5-flash-preview-native-audio-09-2025"
 
     def get_config(self, resumption_handle: str = None) -> types.LiveConnectConfig:
         """Returns the configuration for the Gemini Live session.
