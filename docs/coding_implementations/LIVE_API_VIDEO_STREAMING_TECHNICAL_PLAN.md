@@ -292,19 +292,9 @@ Make video streaming state visible in connection log, health check, and Cloud Ru
 
 ### Implementation Steps
 
-#### 4.1 Add video state to `/health` endpoint (`main.py`)
+#### 4.1 ~~Add video state to `/health` endpoint~~ — SUPERSEDED (issue #24)
 
-In the health check function, add a `video_streaming` component:
-
-```python
-# Video streaming state (issue #22)
-components["video_streaming"] = {
-    "status": "streaming" if _video_streaming else "idle",
-    "frames_sent": _video_frames_sent,
-    "fps": 1,
-    "last_error": _video_last_error,
-}
-```
+Video streaming is part of the Gemini Live API component, not a separate health component. Its non-`"ok"` idle status caused a false "Unknown error" in the UI component panel. Video state is now reported exclusively via WebSocket `video_status` messages and Cloud Run logs.
 
 #### 4.2 Connection log entries (already in Phase 1 & 2)
 

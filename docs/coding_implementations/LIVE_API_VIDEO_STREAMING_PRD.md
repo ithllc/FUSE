@@ -119,7 +119,7 @@ Every aspect of video streaming is visible to the user and logged for debugging:
 - Connection log shows "VIDEO: Streaming started (1 FPS, 768x768)"
 - Connection log shows frame count periodically: "VIDEO: 30 frames sent"
 - Connection log shows errors: "VIDEO: Frame send failed — [reason]"
-- `/health` endpoint includes `video_streaming: {status, frames_sent, fps}`
+- Video streaming state reported via WebSocket `video_status` messages (removed from `/health` — video is part of Gemini Live API component, issue #24)
 
 ---
 

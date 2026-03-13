@@ -122,7 +122,7 @@ Audio and video frames are multiplexed on the same WebSocket using a prefix byte
 ### Observability
 
 - Connection log: `VIDEO: Streaming at 1 FPS (768x768)`, `VIDEO: 30 frames sent`, `VIDEO: Frame send failed — [reason]`
-- `/health` endpoint: `video_streaming` component with status, frames_sent, fps, last_error
+- WebSocket `video_status` messages report frames_sent in real time (video streaming is part of Gemini Live API, not a separate `/health` component — issue #24)
 - Cloud Run logs: Structured `logger.info()` / `logger.warning()` for all video events
 
 ## 3. Live API Function Calling: On-Demand Vision Capture (Issue #19)

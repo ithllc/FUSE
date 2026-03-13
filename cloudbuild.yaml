@@ -37,6 +37,7 @@ steps:
       - '2Gi'
       - '--min-instances'
       - '1'
+      - '--cpu-boost'
       - '--timeout'
       - '300'
       - '--session-affinity'

@@ -116,13 +116,9 @@ async def health_check():
         else:
             components[name] = {"status": "error", "detail": "Not initialized"}
 
-    # 3. Video streaming state (issue #22)
-    components["video_streaming"] = {
-        "status": "streaming" if _video_streaming else "idle",
-        "frames_sent": _video_frames_sent,
-        "fps": 1,
-        "last_error": _video_last_error,
-    }
+    # 3. Video streaming is part of the Gemini Live API component (not a separate
+    #    component). Its status is reported via WebSocket video_status messages.
+    #    Removed from /health to avoid false "Unknown error" in component panel (issue #24).
 
     # 4. Session state summary
     session = {}
@@ -819,6 +815,8 @@ async def run_periodic_validation(interval_seconds: int = 60):
 
 
 async def start_agents():
+    """Initialize all FUSE components. Awaited at startup so Cloud Run readiness
+    probe does not pass until handlers are ready (fixes cold-start issue #23)."""
     global live_handler, diagram_renderer, state_manager, vision_capture, proof_orchestrator, imagen_visualizer, veo3_animator
     print(f"--- Initializing FUSE: The Collaborative Brainstorming Intelligence (Project: {PROJECT_ID}) ---")
 
@@ -856,12 +854,14 @@ async def start_agents():
 
     print("\n--- System Ready ---")
 
-    # Start periodic validation loop
-    await run_periodic_validation(interval_seconds=60)
-
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(start_agents())
+    # Await initialization so the server does not accept requests until all
+    # handlers are ready. This prevents the 2-minute cold-start delay where
+    # clients connect but get "InitializationError" rejections (issue #23).
+    await start_agents()
+    # Periodic validation runs in the background — does not block readiness
+    asyncio.create_task(run_periodic_validation(interval_seconds=60))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
