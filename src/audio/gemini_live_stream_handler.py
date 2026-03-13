@@ -137,6 +137,8 @@ class GeminiLiveStreamHandler:
             context_window_compression=types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow(),
             ),
+            # Disable thinking to reduce audio latency (issue #26)
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
             # Function calling tools for on-demand vision capture (issue #19)
             tools=LIVE_TOOLS,
             system_instruction=types.Content(
@@ -154,16 +156,13 @@ class GeminiLiveStreamHandler:
                             "'I can hear you clearly. Let us begin your brainstorming session.' "
                             "After this initial greeting and mic check, proceed normally. "
                             "\n\n"
-                            "REAL-TIME VISION: You are receiving live camera frames at 1 FPS. "
-                            "You can see what the user is showing you — whiteboards, physical "
-                            "objects, hand gestures, and spatial arrangements. Use this visual "
-                            "context to understand deictic references like 'this', 'that', "
-                            "'over here'. When you see something relevant, mention it proactively. "
-                            "\n\n"
-                            "DETAILED VISION: You also have the capture_and_analyze_frame function "
-                            "for detailed analysis. Use it when the user asks you to 'look closely' "
-                            "or 'capture that' — it triggers the full vision pipeline to extract "
-                            "a Mermaid diagram from what the camera sees. "
+                            "ON-DEMAND VISION: You have the capture_and_analyze_frame function "
+                            "to see what the user's camera is showing. Call it when the user asks "
+                            "you to 'look at this', 'capture that', 'what do you see', or any "
+                            "reference to something visual. It triggers the full vision pipeline "
+                            "to extract a Mermaid diagram from the camera frame. You should call "
+                            "this function proactively when the user mentions physical objects, "
+                            "whiteboards, or spatial arrangements. "
                             "\n\n"
                             "PROXY OBJECTS: When a user assigns a role to a physical object "
                             "(e.g., 'This stapler is a GPU'), call set_proxy_object to register it. "

@@ -730,8 +730,8 @@
                         </svg>
                     </button>
                     <!-- A/B test: Video-to-Gemini toggle (issue #26) -->
-                    <button class="media-btn active" id="btnVideoGemini" onclick="toggleVideoToGemini()" title="Toggle Video to Gemini (A/B Test)" style="font-size:10px; padding:4px 8px; min-width:auto;">
-                        V→AI
+                    <button class="media-btn" id="btnVideoGemini" onclick="toggleVideoToGemini()" title="Video streaming to Gemini: OFF — audio only (click to enable)" style="font-size:10px; padding:4px 8px; min-width:auto;">
+                        V⊘AI
                     </button>
                 </div>
             </div>
@@ -958,7 +958,9 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let countdownInterval = null;
 
         // --- A/B test: Video-to-Gemini toggle (issue #26) ---
-        let videoToGeminiEnabled = true;
+        // Default OFF — continuous video frames cause Gemini audio stalls.
+        // Vision is available on-demand via function calling (issue #19).
+        let videoToGeminiEnabled = false;
 
         function toggleVideoToGemini() {
             videoToGeminiEnabled = !videoToGeminiEnabled;

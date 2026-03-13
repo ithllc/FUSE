@@ -475,7 +475,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             logger.info(f"VIDEO: Streaming stopped ({_video_frames_sent} frames sent)")
 
                     # A/B test: video-to-gemini toggle (issue #26)
-                    _video_to_gemini_enabled = True
+                    # Default OFF — continuous video frames cause Gemini audio stalls
+                    # (17s+ delays after ~10 exchanges). Use on-demand function calling instead.
+                    _video_to_gemini_enabled = False
 
                     # Latency instrumentation state (issue #25)
                     _latency_samples = []
