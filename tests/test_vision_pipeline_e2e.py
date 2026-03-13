@@ -105,7 +105,7 @@ def run():
     # Step 4: GET /render/realistic
     print("[5/6] Generating Imagen visualization via /render/realistic...")
     try:
-        with httpx.Client(timeout=120) as c:
+        with httpx.Client(timeout=180) as c:
             r = c.get(f"{BASE_URL}/render/realistic")
             if r.headers.get("content-type", "").startswith("image/"):
                 out = os.path.join(OUTPUT_DIR, "realistic_visualization.png")
