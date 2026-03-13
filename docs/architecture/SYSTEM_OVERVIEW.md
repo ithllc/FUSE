@@ -14,8 +14,8 @@ graph TD
     end
 
     subgraph Cloud Run - FastAPI
-        B2 -- WebSocket /live --> H1[GeminiLiveStreamHandler]
-        C2 -- WebSocket /live --> H1
+        B2 -- "WebSocket /live (audio+video)" --> H1[GeminiLiveStreamHandler]
+        C2 -- "WebSocket /live (audio+video)" --> H1
         B2 -- HTTP POST /vision/frame --> V1[VisionStateCapture]
         C2 -- HTTP POST /vision/frame --> V1
         V1 --> SC[SceneClassifier - Pass 1]
@@ -52,7 +52,7 @@ graph TD
 | **VisionStateCapture** | Two-pass vision pipeline: scene classification, ROI cropping, and mode-specific extraction. | `gemini-3.1-flash-lite-preview` |
 | **SceneClassifier** | Pass 1: Classifies scene type (whiteboard/objects/gesture/mixed/unclear) and returns bounding box ROI. | `gemini-3.1-flash-lite-preview` |
 | **VisionPrompts** | Pass 2: Mode-specific prompt templates with context injection (proxy registry, transcript, current diagram state). | Prompt templates |
-| **GeminiLiveStreamHandler** | Bidirectional audio streaming with function calling. Handles proxy assignments, vision mode switching, and on-demand vision capture via tool use. Session resumption + context compression for stability. | `gemini-live-2.5-flash-native-audio` |
+| **GeminiLiveStreamHandler** | Bidirectional audio+video streaming with function calling. Sends audio and video (1 FPS, 768x768 JPEG) via separate `send_realtime_input()` calls to the Gemini Live API. Handles proxy assignments, vision mode switching, and on-demand vision capture via tool use. Session resumption + context compression for stability. | `gemini-live-2.5-flash-native-audio` |
 | **ProofOrchestrator** | High-fidelity architectural reasoning and validation. | `gemini-3.1-pro-preview` |
 | **SessionStateManager** | Low-latency state persistence, event logging, vision mode, proxy registry, transcript retrieval, and session diagnostics aggregation. | Google Cloud Memory Store (Redis) |
 | **DiagramRenderer** | Automated PNG generation for session output. | Mermaid CLI (`mmdc`) |
@@ -84,7 +84,7 @@ The vision system uses a **two-pass architecture** to focus on relevant content:
 | **Python Client** (`client_streamer.py`) | PyAudio microphone capture | OpenCV webcam capture | Headless / CLI environments |
 
 ## 5. Communication Protocols
-*   **WebSockets (`/live`)**: Handles bidirectional binary audio (PCM16) between clients and the Gemini Live API session. Supports function calling for on-demand vision capture (`capture_and_analyze_frame`), session context retrieval (`get_session_context`), and proxy registration (`set_proxy_object`). Includes automatic session resumption and reconnect loop (issue #18). All tool calls are logged to Redis for audit trail (issue #19).
+*   **WebSockets (`/live`)**: Handles bidirectional audio+video streaming between clients and the Gemini Live API session. Audio (PCM16) and video (JPEG frames with `V` prefix byte) are multiplexed on the same WebSocket. The server demultiplexes by checking the first byte: `V` (0x56) = video frame buffered for the `video_sender` coroutine; otherwise = audio sent directly to Gemini. Video frames are sent to the Live API at 1 FPS (768x768, JPEG quality 70) via `send_realtime_input(video=Blob)`, while audio uses `send_realtime_input(audio=Blob)` — these are separate calls since the API accepts only one parameter per call (issue #22). Supports function calling for on-demand vision capture (`capture_and_analyze_frame`), session context retrieval (`get_session_context`), and proxy registration (`set_proxy_object`). Includes automatic session resumption and reconnect loop (issue #18). All tool calls are logged to Redis for audit trail (issue #19).
 *   **REST API (`/vision/frame`)**: Ingests JPEG frames for two-pass vision analysis. Supports `?mode=` query parameter override. Implements frame debouncing.
 *   **REST API (`/vision/mode`)**: GET returns current vision mode; POST sets it (`auto`, `whiteboard`, `imagine`, `charades`).
 *   **REST API (`/state/mermaid`)**: Returns the current Mermaid.js architectural state from Redis.
@@ -129,7 +129,8 @@ The `/live` WebSocket handler includes session resilience features:
 - **Context Window Compression**: `SlidingWindow` compression prevents the 128k token limit from being reached, removing the ~15-minute session cap.
 - **Reconnect Loop**: When `session.receive()` ends or GoAway fires, the handler reconnects transparently (up to 10 retries) while keeping the client WebSocket open.
 - **GoAway Handling**: Detects server shutdown warnings and triggers proactive reconnect.
-- **Keepalive Ping (Issue #20)**: A dedicated `keepalive_ping()` async task sends `{"type": "ping", "ts": <timestamp>}` to the client WebSocket every 15 seconds. This prevents Cloud Run's HTTP/2 load balancer from killing the connection during idle periods caused by Gemini reconnects or long-running function calls. The ping task runs alongside `receive_from_client()` and `send_to_client()` and survives Gemini session transitions. The client silently consumes ping messages without UI output.
+- **Keepalive Ping (Issue #20)**: A dedicated `keepalive_ping()` async task sends `{"type": "ping", "ts": <timestamp>}` to the client WebSocket every 15 seconds. This prevents Cloud Run's HTTP/2 load balancer from killing the connection during idle periods caused by Gemini reconnects or long-running function calls. The ping task runs alongside the other coroutines and survives Gemini session transitions. The client silently consumes ping messages without UI output.
+- **Video Streaming (Issue #22)**: A dedicated `video_sender()` async task reads the latest buffered camera frame at 1 FPS, resizes it to 768x768 via OpenCV, compresses to JPEG quality 70, and sends it to Gemini via `session.send_realtime_input(video=Blob)`. This gives Gemini real-time visual awareness of whiteboards, objects, and gestures without requiring explicit function calls. The `/live` handler now runs four concurrent tasks: `receive_from_client()`, `send_to_client()`, `keepalive_ping()`, and `video_sender()`.
 
 ## 8. Auto-Workflow Progression and Output Tabs
 
@@ -156,7 +157,7 @@ Tab states: `disabled` → `processing` (spinner) → `ready` (glow animation) �
 
 FUSE includes a lightweight observability layer for user acceptance testing and demo debugging:
 
-- **Deep Health Check** (`/health`): Verifies Redis connectivity (with latency), all 6 component initializations, and session state summary including recent error events.
+- **Deep Health Check** (`/health`): Verifies Redis connectivity (with latency), all 6 component initializations, video streaming state (status, frames_sent, fps, last_error), and session state summary including recent error events.
 - **Structured WebSocket Messages**: The `/live` endpoint sends `{"type": "status", "stage": "..."}` and `{"type": "error", "stage": "...", "error_type": "...", "detail": "..."}` messages at each connection stage (initialization → connecting → connected). Errors are logged as `connection_error` events in Redis.
 - **System Status Panel**: A collapsible UI panel (header gear icon) showing component health with green/red indicators, session metrics (vision mode, proxy count, diagram length), and a timestamped connection log with color-coded entries.
 - **WebSocket Close Diagnostics**: Close codes (1000, 1006, 1011, etc.) are parsed into human-readable descriptions and displayed in both the chat and connection log.

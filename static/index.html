@@ -991,6 +991,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
             setStatus(false);
             clearSessionTimer();
             if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
+            // Stop video streaming to Live API (issue #22)
+            if (videoFrameInterval) { clearInterval(videoFrameInterval); videoFrameInterval = null; }
             document.getElementById('btnConnect').textContent = 'Start Session';
             document.getElementById('btnConnect').style.background = '';
             document.getElementById('btnConnect').style.borderColor = '';
@@ -1038,6 +1040,16 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
                         // Handle keepalive pings from server (issue #20)
                         if (data.type === 'ping') {
+                            return;
+                        }
+
+                        // Handle video streaming status from server (issue #22)
+                        if (data.type === 'video_status') {
+                            if (data.frames_sent) {
+                                addConnectionLog('VIDEO: ' + data.frames_sent + ' frames sent', 'ok');
+                            } else if (data.message) {
+                                addConnectionLog(data.message, 'ok');
+                            }
                             return;
                         }
 
@@ -1294,6 +1306,36 @@ Powered by Gemini 3.1 Pro Preview.</div>
             } catch (e) {
                 addMsg('system', 'Camera access denied: ' + e.message);
             }
+        }
+
+        // --- Send video frames to Live API via WebSocket (issue #22) ---
+        let videoFrameInterval = null;
+
+        function sendVideoFrameWS() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            const video = document.getElementById('localVideo');
+            if (!video || !video.videoWidth) return;
+            const canvas = document.getElementById('captureCanvas');
+            canvas.width = 768;
+            canvas.height = 768;
+            const ctx = canvas.getContext('2d');
+            // Center-crop to square then draw at 768x768
+            const vw = video.videoWidth, vh = video.videoHeight;
+            const side = Math.min(vw, vh);
+            const sx = (vw - side) / 2, sy = (vh - side) / 2;
+            ctx.drawImage(video, sx, sy, side, side, 0, 0, 768, 768);
+            canvas.toBlob((blob) => {
+                if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
+                blob.arrayBuffer().then(buf => {
+                    // Prefix with 'V' (0x56) to distinguish from audio PCM
+                    const prefix = new Uint8Array([0x56]);
+                    const frame = new Uint8Array(buf);
+                    const combined = new Uint8Array(prefix.length + frame.length);
+                    combined.set(prefix);
+                    combined.set(frame, prefix.length);
+                    ws.send(combined.buffer);
+                });
+            }, 'image/jpeg', 0.7);
         }
 
         let frameInFlight = false; // Backpressure: skip if previous frame still pending (#15)
@@ -2001,6 +2043,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
             // Transition to active session
             sessionState = 'active';
             addConnectionLog('Session active', 'ok');
+
+            // Start video streaming to Live API at 1 FPS (issue #22)
+            if (cameraStream && ws && ws.readyState === WebSocket.OPEN) {
+                videoFrameInterval = setInterval(() => {
+                    if (sessionState === 'active') sendVideoFrameWS();
+                }, 1000);
+                addConnectionLog('VIDEO: Streaming to Live API at 1 FPS', 'ok');
+            }
+
             // Start 5-minute session timer now (not during diagnostics)
             startSessionTimer();
         }

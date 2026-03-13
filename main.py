@@ -48,6 +48,27 @@ _processing_frame = False
 # Latest camera frame buffer for on-demand capture via Live API function calls (issue #19)
 _latest_frame: Optional[bytes] = None
 
+# Video streaming state for observability (issue #22)
+_video_streaming = False
+_video_frames_sent = 0
+_video_last_error = None
+
+
+def _resize_frame_for_live_api(frame_bytes: bytes) -> bytes:
+    """Resize frame to 768x768 JPEG quality 70 for Gemini Live API video input (issue #22)."""
+    import cv2
+    import numpy as np
+    try:
+        arr = np.frombuffer(frame_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return frame_bytes
+        img = cv2.resize(img, (768, 768), interpolation=cv2.INTER_AREA)
+        _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return buf.tobytes()
+    except Exception:
+        return frame_bytes
+
 # Initialize FastAPI app
 app = FastAPI(title="FUSE: Collaborative Brainstorming Intelligence API")
 
@@ -95,7 +116,15 @@ async def health_check():
         else:
             components[name] = {"status": "error", "detail": "Not initialized"}
 
-    # 3. Session state summary
+    # 3. Video streaming state (issue #22)
+    components["video_streaming"] = {
+        "status": "streaming" if _video_streaming else "idle",
+        "frames_sent": _video_frames_sent,
+        "fps": 1,
+        "last_error": _video_last_error,
+    }
+
+    # 4. Session state summary
     session = {}
     if state_manager and components["redis"]["status"] == "ok":
         try:
@@ -391,17 +420,79 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "proxies": state_manager.get_proxy_registry()
                             }))
 
+                    async def video_sender():
+                        """Send camera frames to Gemini Live API at 1 FPS for visual awareness (issue #22)."""
+                        global _video_streaming, _video_frames_sent, _video_last_error
+                        try:
+                            _video_streaming = True
+                            _video_frames_sent = 0
+                            _video_last_error = None
+
+                            # Notify client that video streaming started
+                            await websocket.send_text(json.dumps({
+                                "type": "video_status",
+                                "status": "streaming",
+                                "message": "VIDEO: Streaming at 1 FPS (768x768)"
+                            }))
+                            logger.info("VIDEO: Streaming started (1 FPS, 768x768)")
+
+                            while session_active and client_connected:
+                                await asyncio.sleep(1.0)  # 1 FPS
+
+                                if not session_active or not client_connected:
+                                    break
+
+                                frame = _latest_frame
+                                if frame is None:
+                                    continue
+
+                                try:
+                                    resized = _resize_frame_for_live_api(frame)
+                                    video_blob = genai_types.Blob(
+                                        data=resized,
+                                        mime_type="image/jpeg"
+                                    )
+                                    await session.send_realtime_input(video=video_blob)
+                                    _video_frames_sent += 1
+
+                                    # Log every 30 frames (30 seconds)
+                                    if _video_frames_sent % 30 == 0:
+                                        logger.info(f"VIDEO: {_video_frames_sent} frames sent")
+                                        await websocket.send_text(json.dumps({
+                                            "type": "video_status",
+                                            "status": "streaming",
+                                            "frames_sent": _video_frames_sent
+                                        }))
+
+                                except Exception as e:
+                                    _video_last_error = str(e)
+                                    logger.warning(f"VIDEO: Frame send failed — {e}")
+
+                        except asyncio.CancelledError:
+                            pass
+                        finally:
+                            _video_streaming = False
+                            logger.info(f"VIDEO: Streaming stopped ({_video_frames_sent} frames sent)")
+
                     async def receive_from_client():
                         nonlocal session_active, client_connected
+                        global _latest_frame
                         try:
                             while session_active:
                                 message = await websocket.receive()
                                 if "bytes" in message:
-                                    audio_blob = genai_types.Blob(
-                                        data=message["bytes"],
-                                        mime_type="audio/pcm;rate=16000"
-                                    )
-                                    await session.send_realtime_input(audio=audio_blob)
+                                    raw = message["bytes"]
+                                    # Check for video frame prefix 'V' (0x56) — issue #22
+                                    if len(raw) > 1 and raw[0:1] == b'V':
+                                        # Video frame — update latest frame buffer
+                                        _latest_frame = raw[1:]
+                                    else:
+                                        # Audio frame — send to Gemini Live API
+                                        audio_blob = genai_types.Blob(
+                                            data=raw,
+                                            mime_type="audio/pcm;rate=16000"
+                                        )
+                                        await session.send_realtime_input(audio=audio_blob)
                                 elif "text" in message:
                                     raw = message["text"]
                                     try:
@@ -519,11 +610,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         finally:
                             session_active = False
 
-                    # Run all three tasks; when send or receive finishes, cancel the others
+                    # Run all four tasks; when send or receive finishes, cancel the others
                     tasks = [
                         asyncio.create_task(receive_from_client()),
                         asyncio.create_task(send_to_client()),
                         asyncio.create_task(keepalive_ping()),
+                        asyncio.create_task(video_sender()),
                     ]
 
                     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

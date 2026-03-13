@@ -62,7 +62,70 @@ sequenceDiagram
 ### Frame Debouncing
 The `/vision/frame` endpoint implements frame-level debouncing: if a frame arrives while a previous frame is still being processed, it is dropped with `{"status": "skipped"}`. This prevents processing backlog during continuous streaming.
 
-## 2. Live API Function Calling: On-Demand Vision Capture (Issue #19)
+## 2. Live API Audio+Video Streaming: Real-Time Visual Awareness (Issue #22)
+
+The Gemini Live session streams both audio and video to the model simultaneously. This gives Gemini real-time visual awareness — it can see whiteboards, physical objects, hand gestures, and spatial arrangements without requiring explicit function calls.
+
+### Dual Pipeline Architecture
+
+Camera frames flow through two parallel pipelines serving different purposes:
+
+| Pipeline | Purpose | Rate | Model | Transport |
+|----------|---------|------|-------|-----------|
+| **Live API Video** | Real-time awareness — Gemini sees and understands context | 1 FPS | `gemini-live-2.5-flash-native-audio` | WebSocket (binary with `V` prefix) |
+| **REST /vision/frame** | Heavy extraction — two-pass scene classification, ROI cropping, Mermaid generation | 0.5 FPS | `gemini-3.1-flash-lite-preview` | HTTP POST |
+
+### Video Streaming Flow
+
+```mermaid
+sequenceDiagram
+    participant Browser as Web UI
+    participant WS as WebSocket /live
+    participant Sender as video_sender() coroutine
+    participant GeminiLive as Gemini 2.5 Flash Live API
+    participant REST as POST /vision/frame
+    participant Vision as VisionStateCapture
+
+    Browser->>WS: Binary frame (V prefix + JPEG)
+    WS->>WS: Demux: V prefix → buffer in _latest_frame
+    Browser->>REST: Binary frame (JPEG, 0.5 FPS)
+    REST->>Vision: Two-pass extraction
+
+    loop Every 1 second
+        Sender->>Sender: Read _latest_frame
+        Sender->>Sender: Resize to 768x768, JPEG quality 70
+        Sender->>GeminiLive: send_realtime_input(video=Blob)
+    end
+
+    Note over GeminiLive: Gemini now sees what the user sees
+    GeminiLive-->>WS: Audio: "I can see you're holding a stapler..."
+```
+
+### Binary Frame Multiplexing
+
+Audio and video frames are multiplexed on the same WebSocket using a prefix byte:
+
+| First Byte | Interpretation | Action |
+|-----------|---------------|--------|
+| `0x56` (`V`) | Video frame (JPEG) | Strip prefix, buffer in `_latest_frame` |
+| Any other | Audio frame (PCM16) | Send directly via `send_realtime_input(audio=)` |
+
+### Token Budget
+
+| Stream | Token Rate | Notes |
+|--------|-----------|-------|
+| Audio only | 25 tok/s | ~85 min without compression |
+| Video only | 258 tok/s | ~8 min without compression |
+| Audio + Video | 283 tok/s | ~7.5 min without compression |
+| With SlidingWindow | Unlimited | Old context (including old frames) discarded |
+
+### Observability
+
+- Connection log: `VIDEO: Streaming at 1 FPS (768x768)`, `VIDEO: 30 frames sent`, `VIDEO: Frame send failed — [reason]`
+- `/health` endpoint: `video_streaming` component with status, frames_sent, fps, last_error
+- Cloud Run logs: Structured `logger.info()` / `logger.warning()` for all video events
+
+## 3. Live API Function Calling: On-Demand Vision Capture (Issue #19)
 
 The Gemini Live session supports function calling (tool use). When the user asks Gemini to look at something, Gemini calls `capture_and_analyze_frame` which triggers the REST vision pipeline using the latest buffered camera frame.
 
@@ -102,7 +165,7 @@ All function calls are logged to Redis:
 - `tool_response` event: function name, status, latency_ms, call_id
 - Client sees `TOOL: capture_and_analyze_frame ✓ (450ms)` in the connection log
 
-## 3. "Imagine" Mode: Proxy Object Registry (Live Stream)
+## 4. "Imagine" Mode: Proxy Object Registry (Live Stream)
 This workflow handles real-time voice-to-state object assignments. Voice input is supported from both the **Web UI** (browser microphone via Web Audio API) and the **Python client** (`client_streamer.py` via PyAudio). Proxy objects can also be registered via Gemini function calling (`set_proxy_object`).
 
 ### Browser Voice Flow
@@ -140,7 +203,7 @@ sequenceDiagram
     GeminiLive-->>Client: Audio Response ("Understood, Stapler is now a GPU cluster")
 ```
 
-## 4. Vision Mode Switching
+## 5. Vision Mode Switching
 
 Users can switch vision modes via three mechanisms:
 
@@ -152,11 +215,11 @@ Users can switch vision modes via three mechanisms:
 
 Supported modes: `auto`, `whiteboard`, `imagine`, `charades`
 
-## 5. Transcript Logging for Context Injection
+## 6. Transcript Logging for Context Injection
 
 Both user text messages and model text responses are logged as `voice_input` events in Redis during the WebSocket session. These events are retrieved by `get_recent_transcript()` and injected into the Charades mode prompt for gesture-voice cross-referencing.
 
-## 6. On-Demand Rendering Workflow
+## 7. On-Demand Rendering Workflow
 This workflow converts the persisted state into a high-fidelity visual output.
 
 ```mermaid
@@ -174,7 +237,7 @@ sequenceDiagram
     Server-->>User: Binary Image Response (image/png)
 ```
 
-## 7. Photorealistic Visualization Pipeline (Imagen + Veo 3)
+## 8. Photorealistic Visualization Pipeline (Imagen + Veo 3)
 
 This workflow transforms Mermaid diagrams into photorealistic images and animated videos.
 
@@ -228,7 +291,7 @@ The `MermaidSceneTranslator` converts Mermaid syntax into visual scene descripti
 - **`person_generation="allow_adult"`**: Required because Imagen output frequently includes human-like silhouettes in architecture scenes. The previous `"dont_allow"` setting caused Veo3 to return empty `generated_videos` arrays with no error, silently filtering out valid results.
 - **Non-blocking polling**: The Veo3 animator uses `await asyncio.sleep()` instead of blocking `time.sleep()` in its polling loop to avoid blocking the FastAPI event loop during the 30-180 second generation window.
 
-## 8. Auto-Workflow: Diagram → Validate → Visualize → Animate
+## 9. Auto-Workflow: Diagram → Validate → Visualize → Animate
 
 When a diagram is created or updated via the vision pipeline, the Web UI automatically chains all downstream processing steps:
 

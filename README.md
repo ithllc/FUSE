@@ -25,7 +25,7 @@ FUSE is a multimodal AI brainstorming partner that sees, hears, and collaborates
 ### Key Capabilities
 
 - **Live Whiteboard Extraction** — Camera captures whiteboard sketches and FUSE converts them into structured Mermaid.js diagrams using Gemini 3.1 Flash Lite
-- **Real-Time Voice Conversation** — Bidirectional voice streaming with Gemini 2.5 Flash Native Audio for natural, hands-free interaction
+- **Real-Time Voice + Video Conversation** — Bidirectional audio+video streaming with Gemini 2.5 Flash Native Audio. Gemini sees camera frames at 1 FPS for real-time visual awareness of whiteboards, objects, and gestures
 - **"Imagine" Mode** — Use everyday objects (coffee mug, stapler, notebook) as physical proxies for technical components. Say "Imagine this mug is a database" and FUSE tracks it in the architecture
 - **"Charades" Mode** — Use hand gestures and body positioning to describe architecture topologies while narrating verbally
 - **Automated Architecture Validation** — Gemini 3.1 Pro continuously checks designs for bottlenecks, single points of failure, and logical inconsistencies
@@ -41,11 +41,12 @@ FUSE is a multimodal AI brainstorming partner that sees, hears, and collaborates
 ```
 Browser / Python Client
     │
-    ├── WebSocket /live ──────────► Gemini Live API (Voice + Function Calling)
-    │                                 gemini-2.5-flash-native-audio
+    ├── WebSocket /live ──────────► Gemini Live API (Audio + Video + Function Calling)
+    │     (audio PCM + video JPEG)    gemini-2.5-flash-native-audio
+    │                                 Video: 1 FPS, 768x768 — real-time awareness
     │
     ├── POST /vision/frame ───────► VisionStateCapture (Two-Pass Pipeline)
-    │                                 gemini-3.1-flash-lite-preview
+    │     (JPEG, 0.5 FPS)            gemini-3.1-flash-lite-preview
     │
     ├── GET /validate ────────────► ProofOrchestrator
     │                                 gemini-3.1-pro-preview
@@ -66,7 +67,7 @@ Browser / Python Client
 
 | Component | Model | Purpose |
 |-----------|-------|---------|
-| GeminiLiveStreamHandler | `gemini-2.5-flash-native-audio` | Bidirectional voice streaming with function calling |
+| GeminiLiveStreamHandler | `gemini-2.5-flash-native-audio` | Bidirectional audio+video streaming with function calling |
 | VisionStateCapture | `gemini-3.1-flash-lite-preview` | Two-pass whiteboard/object/gesture extraction |
 | ProofOrchestrator | `gemini-3.1-pro-preview` | Architecture validation and reasoning |
 | SessionStateManager | — | Redis-backed session persistence |
@@ -146,7 +147,7 @@ The build pipeline:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Web UI |
-| `/live` | WebSocket | Bidirectional voice/vision streaming with function calling |
+| `/live` | WebSocket | Bidirectional audio+video streaming with function calling (dual pipeline) |
 | `/vision/frame` | POST | Submit camera frame for analysis (supports `?mode=` override) |
 | `/vision/mode` | GET/POST | Get or set vision mode (`auto`, `whiteboard`, `imagine`, `charades`) |
 | `/state/mermaid` | GET | Current architecture state (Mermaid code) |
@@ -170,7 +171,7 @@ FUSE/
 ├── static/index.html                # Web UI
 ├── src/
 │   ├── audio/
-│   │   └── gemini_live_stream_handler.py   # Gemini Live API voice streaming
+│   │   └── gemini_live_stream_handler.py   # Gemini Live API audio+video streaming
 │   ├── vision/
 │   │   └── vision_state_capture.py         # Whiteboard frame analysis
 │   ├── state/
