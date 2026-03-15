@@ -61,6 +61,7 @@
             grid-template-columns: 1fr 1fr;
             gap: 16px;
             padding: 16px;
+            padding-bottom: 56px; /* Room for status bar at bottom */
             height: calc(100vh - 68px);
         }
         .left-column {
@@ -655,7 +656,6 @@
             <span>Collaborative Brainstorming Intelligence</span>
         </div>
         <div class="btn-group">
-            <button class="btn btn-sm" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
             <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Start Session</button>
             <div class="status-badge disconnected" id="statusBadge">
                 <div class="status-dot"></div>
@@ -663,30 +663,6 @@
             </div>
         </div>
     </header>
-
-    <!-- System Status Panel (collapsible) -->
-    <div id="systemStatusPanel" style="display:none;">
-        <div class="panel" style="margin:0 16px; border-radius:0 0 12px 12px; border-top:none;">
-            <div class="panel-body" style="padding:12px 16px;">
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-                    <div>
-                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Components</h3>
-                        <div id="componentHealth" style="font-size:13px; line-height:2;">Loading...</div>
-                    </div>
-                    <div>
-                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Session</h3>
-                        <div id="sessionInfo" style="font-size:13px; line-height:2;">No session data</div>
-                    </div>
-                </div>
-                <div style="margin-top:12px;">
-                    <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Connection Log</h3>
-                    <div id="connectionLog" style="font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; background:#0d1117; border-radius:6px; padding:8px; color:#8b949e;">
-                        No events yet.
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <div class="main-grid">
         <!-- Left Column: Camera Feed + Session Notes -->
@@ -832,6 +808,33 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         <p id="animatedStatus">Waiting for visualization to generate an animated walkthrough...</p>
                     </div>
                     <video id="animatedVideo" controls style="max-width:100%; border-radius:8px; display:none;"></video>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Status Panel — collapsed at bottom (issue #36) -->
+    <div id="statusBottomBar" style="position:fixed; bottom:0; left:0; right:0; z-index:50;">
+        <div onclick="toggleSystemStatus()" style="background:#da3633; color:#fff; text-align:center; padding:10px 16px; cursor:pointer; font-size:15px; font-weight:600; user-select:none;">
+            Status <span id="statusChevron" style="display:inline-block; transition:transform 0.2s;">&#9660;</span>
+        </div>
+        <div id="systemStatusPanel" style="display:none; background:#161b22; border-top:1px solid #30363d; max-height:280px; overflow-y:auto;">
+            <div style="padding:12px 16px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                    <div>
+                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Components</h3>
+                        <div id="componentHealth" style="font-size:13px; line-height:2;">Loading...</div>
+                    </div>
+                    <div>
+                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Session</h3>
+                        <div id="sessionInfo" style="font-size:13px; line-height:2;">No session data</div>
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Connection Log</h3>
+                    <div id="connectionLog" style="font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; background:#0d1117; border-radius:6px; padding:8px; color:#8b949e;">
+                        No events yet.
+                    </div>
                 </div>
             </div>
         </div>
@@ -2056,8 +2059,10 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         function toggleSystemStatus() {
             const panel = document.getElementById('systemStatusPanel');
+            const chevron = document.getElementById('statusChevron');
             const isVisible = panel.style.display !== 'none';
             panel.style.display = isVisible ? 'none' : 'block';
+            if (chevron) chevron.style.transform = isVisible ? '' : 'rotate(180deg)';
             if (!isVisible) refreshSystemStatus();
         }
 
