@@ -1017,6 +1017,34 @@ Powered by Gemini 3.1 Pro Preview.</div>
         // Accumulate partial transcripts and update in-place until finished
         let _pendingTranscript = { user: null, fuse: null };
 
+        // --- Client-side transcript aggregation (issue #37) ---
+        // Buffer partial transcription fragments, display after debounce
+        let _transcriptBuf = { user: [], fuse: [] };
+        let _transcriptTimer = { user: null, fuse: null };
+        const TRANSCRIPT_DEBOUNCE_MS = 1500;
+
+        function bufferTranscript(role, text) {
+            if (!text || !text.trim()) return;
+            _transcriptBuf[role].push(text.trim());
+            // Cancel previous timer
+            if (_transcriptTimer[role]) clearTimeout(_transcriptTimer[role]);
+            // Schedule flush after debounce
+            _transcriptTimer[role] = setTimeout(() => flushTranscript(role), TRANSCRIPT_DEBOUNCE_MS);
+        }
+
+        function flushTranscript(role) {
+            const fragments = _transcriptBuf[role];
+            if (!fragments.length) return;
+            const fullText = fragments.join(' ');
+            _transcriptBuf[role] = [];
+            _transcriptTimer[role] = null;
+            const msgType = role === 'user' ? 'user' : 'fuse';
+            addMsg(msgType, fullText);
+            if (role === 'fuse') {
+                checkForMermaid(fullText);
+            }
+        }
+
         // --- Session timeout ---
         const SESSION_MAX_MS = 5 * 60 * 1000; // 5 minutes
         const SESSION_WARN_MS = 4 * 60 * 1000; // warn at 4 minutes (1 min remaining)
@@ -1326,8 +1354,9 @@ Powered by Gemini 3.1 Pro Preview.</div>
                             const sc = msg.serverContent;
 
                             // Input transcription (what the user said)
+                            // Buffer partials and display as full sentences (issue #37)
                             if (sc.inputTranscription && sc.inputTranscription.text) {
-                                addMsg('user', sc.inputTranscription.text);
+                                bufferTranscript('user', sc.inputTranscription.text);
                                 if (sessionState === 'diagnostics' && !diagChecks.micInput
                                     && sc.inputTranscription.text.trim()) {
                                     diagChecks.micInput = true;
@@ -1339,9 +1368,9 @@ Powered by Gemini 3.1 Pro Preview.</div>
                             }
 
                             // Output transcription (what Gemini said)
+                            // Buffer partials and display as full sentences (issue #37)
                             if (sc.outputTranscription && sc.outputTranscription.text) {
-                                addMsg('fuse', sc.outputTranscription.text);
-                                checkForMermaid(sc.outputTranscription.text);
+                                bufferTranscript('fuse', sc.outputTranscription.text);
                             }
 
                             // Audio data in model turn
