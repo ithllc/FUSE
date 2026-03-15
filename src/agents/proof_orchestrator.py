@@ -16,6 +16,7 @@ class ProofOrchestrator:
     def validate_architecture(self, mermaid_code: str, history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Validates the current architectural state against technical constraints.
+        Synchronous version — use validate_architecture_async for non-blocking calls.
         """
         prompt = (
             f"Review the following Mermaid.js architectural model:\n\n{mermaid_code}\n\n"
@@ -26,6 +27,33 @@ class ProofOrchestrator:
         )
 
         response = self.client.models.generate_content(
+            model=self.model_id,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=prompt)]
+                )
+            ]
+        )
+
+        return {
+            "validation_report": response.text,
+            "is_valid": "INVALID" not in response.text.upper()
+        }
+
+    async def validate_architecture_async(self, mermaid_code: str, history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Async version of validate_architecture — does NOT block the event loop.
+        """
+        prompt = (
+            f"Review the following Mermaid.js architectural model:\n\n{mermaid_code}\n\n"
+            f"History of session events: {history}\n\n"
+            "Identify any logical inconsistencies, network bottlenecks, or single points of failure. "
+            "If the design is invalid, state the reason clearly. If valid, provide a succinct "
+            "Feasibility Report."
+        )
+
+        response = await self.client.aio.models.generate_content(
             model=self.model_id,
             contents=[
                 types.Content(

@@ -986,7 +986,7 @@ async def validate_architecture():
         return {"status": "error", "message": "No architectural state to validate."}
 
     events = state_manager.get_events(limit=20)
-    result = proof_orchestrator.validate_architecture(mermaid_code, events)
+    result = await proof_orchestrator.validate_architecture_async(mermaid_code, events)
     return {"status": "success", **result}
 
 
@@ -1152,7 +1152,7 @@ async def run_periodic_validation(interval_seconds: int = 60):
                 mermaid_code = state_manager.get_architectural_state()
                 if mermaid_code:
                     events = state_manager.get_events(limit=20)
-                    result = proof_orchestrator.validate_architecture(mermaid_code, events)
+                    result = await proof_orchestrator.validate_architecture_async(mermaid_code, events)
                     state_manager.log_event("validation", {
                         "is_valid": result["is_valid"],
                         "report_length": len(result.get("validation_report", ""))
