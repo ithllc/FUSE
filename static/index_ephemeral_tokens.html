@@ -63,6 +63,7 @@
             grid-template-columns: 1fr 1fr;
             gap: 16px;
             padding: 16px;
+            padding-bottom: 56px; /* Room for status bar at bottom */
             height: calc(100vh - 68px);
         }
         .left-column {
@@ -71,8 +72,28 @@
             gap: 16px;
             min-height: 0;
         }
-        .left-column #videoPanel { flex: 2; min-height: 0; }
-        .left-column #chatPanel { flex: 1; min-height: 0; }
+        .left-column #videoPanel { flex: 1; min-height: 0; }
+        .left-column #chatPanel { flex: 1; min-height: 120px; overflow: hidden; }
+        .left-column .resize-handle {
+            height: 6px;
+            cursor: ns-resize;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .left-column .resize-handle:hover,
+        .left-column .resize-handle.dragging {
+            background: #30363d;
+        }
+        .left-column .resize-handle::after {
+            content: '';
+            width: 40px;
+            height: 3px;
+            border-radius: 2px;
+            background: #484f58;
+        }
         .panel {
             background: #161b22;
             border: 1px solid #30363d;
@@ -667,7 +688,7 @@
             <span>Collaborative Brainstorming Intelligence</span>
         </div>
         <div class="btn-group">
-            <button class="btn btn-sm" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
+            <button class="btn btn-sm" style="background:#da3633;border-color:#da3633;color:#fff;" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
             <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()" disabled style="opacity:0.5;cursor:not-allowed;">Loading...</button>
             <div class="status-badge disconnected" id="statusBadge">
                 <div class="status-dot"></div>
@@ -675,30 +696,6 @@
             </div>
         </div>
     </header>
-
-    <!-- System Status Panel (collapsible) -->
-    <div id="systemStatusPanel" style="display:none;">
-        <div class="panel" style="margin:0 16px; border-radius:0 0 12px 12px; border-top:none;">
-            <div class="panel-body" style="padding:12px 16px;">
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-                    <div>
-                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Components</h3>
-                        <div id="componentHealth" style="font-size:13px; line-height:2;">Loading...</div>
-                    </div>
-                    <div>
-                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Session</h3>
-                        <div id="sessionInfo" style="font-size:13px; line-height:2;">No session data</div>
-                    </div>
-                </div>
-                <div style="margin-top:12px;">
-                    <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Status Connection Log</h3>
-                    <div id="connectionLog" style="font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; background:#0d1117; border-radius:6px; padding:8px; color:#8b949e;">
-                        No events yet.
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <div class="main-grid">
         <!-- Left Column: Camera Feed + Session Notes -->
@@ -748,6 +745,8 @@
             </div>
 
             <!-- Session Notes -->
+            <!-- Resize handle between video and notes (issue #37) -->
+            <div class="resize-handle" id="resizeHandle" title="Drag to resize"></div>
             <div class="panel" id="chatPanel">
                 <div class="panel-header">
                     <h2>Session Notes</h2>
@@ -840,6 +839,33 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         <p id="animatedStatus">Waiting for visualization to generate an animated walkthrough...</p>
                     </div>
                     <video id="animatedVideo" controls style="max-width:100%; border-radius:8px; display:none;"></video>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Status Panel — collapsed at bottom (issue #36) -->
+    <div id="statusBottomBar" style="position:fixed; bottom:0; left:0; right:0; z-index:50;">
+        <div onclick="toggleSystemStatus()" style="background:#da3633; color:#fff; text-align:center; padding:10px 16px; cursor:pointer; font-size:15px; font-weight:600; user-select:none;">
+            Status <span id="statusChevron" style="display:inline-block; transition:transform 0.2s;">&#9660;</span>
+        </div>
+        <div id="systemStatusPanel" style="display:none; background:#161b22; border-top:1px solid #30363d; max-height:280px; overflow-y:auto;">
+            <div style="padding:12px 16px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                    <div>
+                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Components</h3>
+                        <div id="componentHealth" style="font-size:13px; line-height:2;">Loading...</div>
+                    </div>
+                    <div>
+                        <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Session</h3>
+                        <div id="sessionInfo" style="font-size:13px; line-height:2;">No session data</div>
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Connection Log</h3>
+                    <div id="connectionLog" style="font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; background:#0d1117; border-radius:6px; padding:8px; color:#8b949e;">
+                        No events yet.
+                    </div>
                 </div>
             </div>
         </div>
@@ -962,8 +988,6 @@ Powered by Gemini 3.1 Pro Preview.</div>
             overlay.classList.add('hidden');
             // Remove from DOM after transition
             setTimeout(() => overlay.remove(), 700);
-            // Show Status panel so user sees component loading
-            document.getElementById('systemStatusPanel').style.display = 'block';
             // Trigger component health check if not already done
             refreshSystemStatus();
         }
@@ -986,6 +1010,13 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let scheduledSources = [];      // track active sources for barge-in
         const SAMPLE_RATE = 16000; // 16kHz mono PCM16 for Gemini Live API
 
+        // --- Diagram validity tracking (issues #34, #35) ---
+        let diagramValid = false;
+
+        // --- Transcript buffering (issue #37) ---
+        // Accumulate partial transcripts and update in-place until finished
+        let _pendingTranscript = { user: null, fuse: null };
+
         // --- Session timeout ---
         const SESSION_MAX_MS = 5 * 60 * 1000; // 5 minutes
         const SESSION_WARN_MS = 4 * 60 * 1000; // warn at 4 minutes (1 min remaining)
@@ -996,6 +1027,38 @@ Powered by Gemini 3.1 Pro Preview.</div>
         // Default OFF — continuous video frames cause Gemini audio stalls.
         // Vision is available on-demand via function calling (issue #19).
         let videoToGeminiEnabled = true; // Always ON for ephemeral token page (issue #31)
+
+        // --- Resize handle for Session Notes (issue #37) ---
+        (function initResize() {
+            const handle = document.getElementById('resizeHandle');
+            const videoPanel = document.getElementById('videoPanel');
+            const chatPanel = document.getElementById('chatPanel');
+            if (!handle || !videoPanel || !chatPanel) return;
+            let startY, startVideoH, startChatH;
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                startY = e.clientY;
+                startVideoH = videoPanel.offsetHeight;
+                startChatH = chatPanel.offsetHeight;
+                handle.classList.add('dragging');
+                document.addEventListener('mousemove', onDrag);
+                document.addEventListener('mouseup', onUp);
+            });
+            function onDrag(e) {
+                const dy = e.clientY - startY;
+                const newVH = Math.max(100, startVideoH + dy);
+                const newCH = Math.max(100, startChatH - dy);
+                videoPanel.style.flex = 'none';
+                chatPanel.style.flex = 'none';
+                videoPanel.style.height = newVH + 'px';
+                chatPanel.style.height = newCH + 'px';
+            }
+            function onUp() {
+                handle.classList.remove('dragging');
+                document.removeEventListener('mousemove', onDrag);
+                document.removeEventListener('mouseup', onUp);
+            }
+        })();
 
         function toggleVideoToGemini() {
             videoToGeminiEnabled = !videoToGeminiEnabled;
@@ -1921,8 +1984,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
             try {
                 const { svg } = await mermaid.render('mermaidDiagram', code);
                 container.innerHTML = svg;
+                diagramValid = true;
             } catch (e) {
                 container.innerHTML = '<div class="diagram-placeholder"><span>Mermaid render error</span><span style="font-size:12px;color:#f85149;">' + e.message + '</span></div>';
+                diagramValid = false;
+                addConnectionLog('WORKFLOW: Mermaid parse error — skipping auto-visualization', 'error');
             }
         }
 
@@ -1943,15 +2009,47 @@ Powered by Gemini 3.1 Pro Preview.</div>
         }
 
         let autoWorkflowDebounce = null;
+
+        function extractMermaidCode(text) {
+            // Strip markdown code fences
+            text = text.replace(/^```(?:mermaid)?\s*\n?/gm, '').replace(/\n?```\s*$/gm, '');
+            // Find where valid Mermaid code starts
+            const lines = text.split('\n');
+            let start = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (/^\s*(graph\s+(TD|TB|BT|LR|RL)|flowchart\s+(TD|TB|BT|LR|RL)|sequenceDiagram|classDiagram|stateDiagram)/.test(lines[i])) {
+                    start = i;
+                    break;
+                }
+            }
+            if (start === -1) return null;
+            // Take from the Mermaid header to the end, stripping trailing narrative
+            const mermaidLines = [];
+            for (let i = start; i < lines.length; i++) {
+                const s = lines[i].trim();
+                if (!s || /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|subgraph|end |end$|style |classDef|linkStyle|%%)/.test(s) ||
+                    /-->|---|-.->|==>/.test(s) || /^[A-Za-z0-9_]/.test(s)) {
+                    mermaidLines.push(lines[i]);
+                } else {
+                    break;
+                }
+            }
+            const code = mermaidLines.join('\n').trim();
+            return code.length > 10 ? code : null;
+        }
+
         function checkForMermaid(text) {
             if (text.includes('graph ') || text.includes('flowchart ') || text.includes('sequenceDiagram')) {
-                renderMermaid(text);
-                addConnectionLog('WORKFLOW: Architecture diagram updated (' + text.length + ' chars)', 'ok');
+                const code = extractMermaidCode(text);
+                if (!code) return;
+                renderMermaid(code);
+                addConnectionLog('WORKFLOW: Architecture diagram updated (' + code.length + ' chars)', 'ok');
                 updateWorkflowStatus('Starting Design of Architectural Diagram...', '#d29922');
                 // Debounce auto-workflow: wait 5s after last diagram update before triggering
                 if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
                 autoWorkflowDebounce = setTimeout(() => {
-                    if (sessionState === 'active') runAutoWorkflow();
+                    // Don't auto-trigger if diagram is invalid or within last 90s of session (issue #33)
+                    if (sessionState === 'active' && diagramValid) runAutoWorkflow();
                 }, 5000);
             }
         }
@@ -2022,6 +2120,21 @@ Powered by Gemini 3.1 Pro Preview.</div>
         // --- Session Overlay ---
         function showSessionOverlay() {
             document.getElementById('demoSubOptions').classList.remove('visible');
+            // Disable download button if no valid diagram (issue #35)
+            const dlBtn = document.querySelector('#sessionOverlay .overlay-btn-primary');
+            if (dlBtn) {
+                if (!diagramValid) {
+                    dlBtn.disabled = true;
+                    dlBtn.style.opacity = '0.4';
+                    dlBtn.style.cursor = 'not-allowed';
+                    dlBtn.title = 'No valid diagram was generated during this session';
+                } else {
+                    dlBtn.disabled = false;
+                    dlBtn.style.opacity = '';
+                    dlBtn.style.cursor = '';
+                    dlBtn.title = '';
+                }
+            }
             document.getElementById('sessionOverlay').classList.add('visible');
         }
 
@@ -2031,6 +2144,10 @@ Powered by Gemini 3.1 Pro Preview.</div>
         }
 
         async function downloadDiagram() {
+            if (!diagramValid) {
+                showToast('No valid diagram available to download');
+                return;
+            }
             try {
                 // Try PNG render first
                 const resp = await fetch(BASE + '/render');
@@ -2247,6 +2364,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         async function runAutoWorkflow() {
             if (autoWorkflowRunning) return;
+            // Don't generate visualizations from invalid Mermaid (issue #34)
+            if (!diagramValid) {
+                addConnectionLog('WORKFLOW: Skipping auto-workflow — diagram has render errors', 'error');
+                return;
+            }
             autoWorkflowRunning = true;
             addConnectionLog('WORKFLOW: Auto-workflow started (validate → visualize → animate)', 'info');
             try {
@@ -2319,6 +2441,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 addConnectionLog('Session timeout warning: 60s remaining', 'error');
 
                 countdownInterval = setInterval(() => {
+                    // Pause countdown while auto-workflow is generating (issue #33)
+                    if (autoWorkflowRunning) {
+                        document.getElementById('countdownTime').textContent = remaining + ' (generating...)';
+                        return;
+                    }
                     remaining--;
                     document.getElementById('countdownTime').textContent = remaining;
                     if (remaining <= 0) {
@@ -2346,8 +2473,10 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         function toggleSystemStatus() {
             const panel = document.getElementById('systemStatusPanel');
+            const chevron = document.getElementById('statusChevron');
             const isVisible = panel.style.display !== 'none';
             panel.style.display = isVisible ? 'none' : 'block';
+            if (chevron) chevron.style.transform = isVisible ? '' : 'rotate(180deg)';
             if (!isVisible) refreshSystemStatus();
         }
 
