@@ -250,7 +250,7 @@ FUSE/
 ### Web UI
 [![FUSE Interface](/docs/submission/FUSE-UI-V3.png)]([target-url](https://fuse-service-864533297567.us-central1.run.app/))
 
-The four-panel interface provides simultaneous access to:
+The three-panel interface provides simultaneous access to:
 
 | Panel | Function |
 |-------|----------|
