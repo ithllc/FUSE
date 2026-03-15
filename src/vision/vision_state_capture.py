@@ -1,3 +1,4 @@
+import re
 import time
 from google import genai
 from google.genai import types
@@ -11,6 +12,65 @@ from src.vision.vision_prompts import (
     GENERIC_FALLBACK_PROMPT,
     build_context_block,
 )
+
+
+def sanitize_mermaid(text: str) -> str:
+    """Strip narrative text, markdown fences, and fix common syntax issues
+    in Gemini-generated Mermaid code."""
+    if not text:
+        return ""
+
+    # Strip markdown code fences (```mermaid ... ``` or ``` ... ```)
+    text = re.sub(r"^```(?:mermaid)?\s*\n?", "", text.strip())
+    text = re.sub(r"\n?```\s*$", "", text.strip())
+
+    # If Gemini returned narrative text mixed with code, extract just the Mermaid
+    lines = text.split("\n")
+    mermaid_start = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if re.match(r"^(graph\s+(TD|TB|BT|LR|RL)|flowchart\s+(TD|TB|BT|LR|RL)|sequenceDiagram|classDiagram|stateDiagram)", stripped):
+            mermaid_start = i
+            break
+
+    if mermaid_start == -1:
+        # No valid Mermaid header found
+        return ""
+    text = "\n".join(lines[mermaid_start:])
+
+    # Remove trailing narrative (lines after the diagram that don't look like Mermaid)
+    cleaned_lines = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        # Keep blank lines, Mermaid keywords, node definitions, edges, subgraphs, style, comments
+        if (not stripped or
+            re.match(r"^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|subgraph|end|style|classDef|linkStyle|%%)", stripped) or
+            "-->" in stripped or "---" in stripped or "-.->""" in stripped or "==>" in stripped or
+            re.match(r"^[A-Za-z0-9_]", stripped)):
+            cleaned_lines.append(line)
+        else:
+            # Likely narrative text — stop here
+            break
+    text = "\n".join(cleaned_lines).strip()
+
+    # Sanitize node labels: escape problematic characters in quoted labels
+    # Replace unescaped parentheses inside node labels like A["Can (DB)"] → A["Can - DB"]
+    text = re.sub(
+        r'(\["|{"|>"|["\(]")([^"]*)\("([^"]*)',
+        lambda m: m.group(0).replace("(", " - ").replace(")", ""),
+        text,
+    )
+    # Fix bare parentheses in node labels: NodeId(Label with (parens)) → NodeId[Label with parens]
+    def fix_paren_labels(match):
+        node_id = match.group(1)
+        label = match.group(2)
+        # Remove nested parens from label
+        label = label.replace("(", "").replace(")", "")
+        return f'{node_id}["{label}"]'
+
+    text = re.sub(r'(\b[A-Za-z_]\w*)\(([^)]*\([^)]*\)[^)]*)\)', fix_paren_labels, text)
+
+    return text
 
 
 class VisionStateCapture:
@@ -123,12 +183,13 @@ class VisionStateCapture:
                         ],
                     )
                 ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="text/plain",
+                    temperature=1.0,
+                ),
             )
             text = response.text.strip() if response.text else ""
-            # Strip markdown code fences if present
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            return text
+            return sanitize_mermaid(text)
         except Exception as e:
             print(f"Vision extraction error: {e}")
             return ""

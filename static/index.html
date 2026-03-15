@@ -953,6 +953,9 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let scheduledSources = [];      // track active sources for barge-in
         const SAMPLE_RATE = 16000; // 16kHz mono PCM16 for Gemini Live API
 
+        // --- Diagram validity tracking (issues #34, #35) ---
+        let diagramValid = false;
+
         // --- Session timeout ---
         const SESSION_MAX_MS = 5 * 60 * 1000; // 5 minutes
         const SESSION_WARN_MS = 4 * 60 * 1000; // warn at 4 minutes (1 min remaining)
@@ -1588,8 +1591,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
             try {
                 const { svg } = await mermaid.render('mermaidDiagram', code);
                 container.innerHTML = svg;
+                diagramValid = true;
             } catch (e) {
                 container.innerHTML = '<div class="diagram-placeholder"><span>Mermaid render error</span><span style="font-size:12px;color:#f85149;">' + e.message + '</span></div>';
+                diagramValid = false;
+                addConnectionLog('WORKFLOW: Mermaid parse error — skipping auto-visualization', 'error');
             }
         }
 
@@ -1610,14 +1616,46 @@ Powered by Gemini 3.1 Pro Preview.</div>
         }
 
         let autoWorkflowDebounce = null;
+
+        function extractMermaidCode(text) {
+            // Strip markdown code fences
+            text = text.replace(/^```(?:mermaid)?\s*\n?/gm, '').replace(/\n?```\s*$/gm, '');
+            // Find where valid Mermaid code starts
+            const lines = text.split('\n');
+            let start = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (/^\s*(graph\s+(TD|TB|BT|LR|RL)|flowchart\s+(TD|TB|BT|LR|RL)|sequenceDiagram|classDiagram|stateDiagram)/.test(lines[i])) {
+                    start = i;
+                    break;
+                }
+            }
+            if (start === -1) return null;
+            // Take from the Mermaid header to the end, stripping trailing narrative
+            const mermaidLines = [];
+            for (let i = start; i < lines.length; i++) {
+                const s = lines[i].trim();
+                if (!s || /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|subgraph|end |end$|style |classDef|linkStyle|%%)/.test(s) ||
+                    /-->|---|-.->|==>/.test(s) || /^[A-Za-z0-9_]/.test(s)) {
+                    mermaidLines.push(lines[i]);
+                } else {
+                    break;
+                }
+            }
+            const code = mermaidLines.join('\n').trim();
+            return code.length > 10 ? code : null;
+        }
+
         function checkForMermaid(text) {
             if (text.includes('graph ') || text.includes('flowchart ') || text.includes('sequenceDiagram')) {
-                renderMermaid(text);
-                addConnectionLog('WORKFLOW: Architecture diagram updated (' + text.length + ' chars)', 'ok');
+                const code = extractMermaidCode(text);
+                if (!code) return;
+                renderMermaid(code);
+                addConnectionLog('WORKFLOW: Architecture diagram updated (' + code.length + ' chars)', 'ok');
                 // Debounce auto-workflow: wait 5s after last diagram update before triggering
                 if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
                 autoWorkflowDebounce = setTimeout(() => {
-                    if (sessionState === 'active') runAutoWorkflow();
+                    // Don't auto-trigger if diagram is invalid or within last 90s of session (issue #33)
+                    if (sessionState === 'active' && diagramValid) runAutoWorkflow();
                 }, 5000);
             }
         }
@@ -1688,6 +1726,21 @@ Powered by Gemini 3.1 Pro Preview.</div>
         // --- Session Overlay ---
         function showSessionOverlay() {
             document.getElementById('demoSubOptions').classList.remove('visible');
+            // Disable download button if no valid diagram (issue #35)
+            const dlBtn = document.querySelector('#sessionOverlay .overlay-btn-primary');
+            if (dlBtn) {
+                if (!diagramValid) {
+                    dlBtn.disabled = true;
+                    dlBtn.style.opacity = '0.4';
+                    dlBtn.style.cursor = 'not-allowed';
+                    dlBtn.title = 'No valid diagram was generated during this session';
+                } else {
+                    dlBtn.disabled = false;
+                    dlBtn.style.opacity = '';
+                    dlBtn.style.cursor = '';
+                    dlBtn.title = '';
+                }
+            }
             document.getElementById('sessionOverlay').classList.add('visible');
         }
 
@@ -1697,6 +1750,10 @@ Powered by Gemini 3.1 Pro Preview.</div>
         }
 
         async function downloadDiagram() {
+            if (!diagramValid) {
+                showToast('No valid diagram available to download');
+                return;
+            }
             try {
                 // Try PNG render first
                 const resp = await fetch(BASE + '/render');
@@ -1904,6 +1961,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let autoWorkflowRunning = false;
         async function runAutoWorkflow() {
             if (autoWorkflowRunning) return;
+            // Don't generate visualizations from invalid Mermaid (issue #34)
+            if (!diagramValid) {
+                addConnectionLog('WORKFLOW: Skipping auto-workflow — diagram has render errors', 'error');
+                return;
+            }
             autoWorkflowRunning = true;
             addConnectionLog('WORKFLOW: Auto-workflow started (validate → visualize → animate)', 'info');
             try {
@@ -1962,6 +2024,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 addConnectionLog('Session timeout warning: 60s remaining', 'error');
 
                 countdownInterval = setInterval(() => {
+                    // Pause countdown while auto-workflow is generating (issue #33)
+                    if (autoWorkflowRunning) {
+                        document.getElementById('countdownTime').textContent = remaining + ' (generating...)';
+                        return;
+                    }
                     remaining--;
                     document.getElementById('countdownTime').textContent = remaining;
                     if (remaining <= 0) {

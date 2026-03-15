@@ -23,7 +23,7 @@ import google.auth.transport.requests  # noqa: F401
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("fuse")
 
-from src.vision.vision_state_capture import VisionStateCapture
+from src.vision.vision_state_capture import VisionStateCapture, sanitize_mermaid
 from src.audio.gemini_live_stream_handler import GeminiLiveStreamHandler
 from src.state.session_state_manager import SessionStateManager
 from src.agents.proof_orchestrator import ProofOrchestrator
@@ -895,7 +895,7 @@ async def render_realistic():
     if not state_manager or not imagen_visualizer:
         return {"status": "error", "message": "System components not initialized."}
 
-    mermaid_code = state_manager.get_architectural_state()
+    mermaid_code = sanitize_mermaid(state_manager.get_architectural_state())
     if not mermaid_code:
         return {"status": "error", "message": "No architectural state to visualize."}
 
@@ -911,7 +911,7 @@ async def render_animate():
     if not state_manager or not imagen_visualizer or not veo3_animator:
         return {"status": "error", "message": "System components not initialized."}
 
-    mermaid_code = state_manager.get_architectural_state()
+    mermaid_code = sanitize_mermaid(state_manager.get_architectural_state())
     if not mermaid_code:
         return {"status": "error", "message": "No architectural state to animate."}
 
