@@ -1,157 +1,66 @@
-# Test Script: Imagine Mode (Proxy Objects)
+# Test Script: Imagine Mode (Ephemeral Tokens)
 
-**Purpose**: End-to-end test of FUSE using physical objects as stand-ins for architecture components.
+**Purpose**: End-to-end test of FUSE proxy object assignment using physical objects as architecture components.
 **Duration**: ~5 minutes
-**What you need**: 3-4 everyday objects on a table (e.g., stapler, coffee mug, phone, pen, book)
+**What you need**: 2-3 everyday objects on your desk (cup, phone, pen, stapler, etc.)
 
 ---
 
 ## Setup
 
 1. Open https://fuse-service-864533297567.us-central1.run.app in Chrome
-2. Wait for the splash page countdown to finish
-3. Place 3-4 objects on a table or desk in front of your camera:
-   - **Stapler** (will be the Load Balancer)
-   - **Coffee mug** (will be the Database)
-   - **Phone** (will be the API Gateway)
-   - **Pen** (will be the Cache Layer)
+2. Click "Ready — Enter FUSE" after the splash page loads
+3. Wait for components to load, then click **Start Session**
+4. Grant mic and camera permissions if prompted
+5. Wait for FUSE to greet you (~10 seconds)
+6. Place 2-3 objects on your desk in view of the camera
 
 ---
 
-## Phase 1: Pre-Session Diagnostics
+## Step 1: Introduce Objects as Proxies
 
-1. Click **"Start Session"**
-   - _Expected_: Camera and microphone activate, countdown starts
-
-2. When prompted, say: **"Hello FUSE"**
-   - _Expected_: All 3 diagnostics pass (Mic, Audio Output, Camera)
-   - _Expected_: "Session active" appears in connection log
-
-_(If any diagnostic fails, see troubleshooting in the Whiteboard Mode script)_
-
----
-
-## Phase 2: Switch to Imagine Mode
-
-3. Say:
-   > **"Switch to imagine mode"**
-   - _Expected_: FUSE responds: "Switched to imagine mode"
-   - _Expected_: Vision mode dropdown shows "Imagine (Objects)"
+1. Point the camera at your objects
+2. Say: **"Look at the objects on my desk. The cup is our database and the phone is the API gateway."**
+3. Watch for in the chat panel:
+   - `TOOL CALL: capture_and_analyze_frame({"mode":"imagine"})` — Gemini captures what it sees
+   - `TOOL CALL: set_proxy_object({"object_name":"cup","technical_role":"database"})` — registers the cup
+   - `TOOL CALL: set_proxy_object({"object_name":"phone","technical_role":"API gateway"})` — registers the phone
+4. Check the **Session Notes** tab → **Proxy Objects** sub-tab — cup and phone should appear in the table
 
 ---
 
-## Phase 3: Register Proxy Objects
+## Step 2: Add More Proxies
 
-Register each physical object as an architecture component. Speak clearly and pause between each assignment.
-
-4. Hold up the stapler and say:
-   > **"This stapler is our load balancer"**
-   - _Expected_: Connection log shows "TOOL: set_proxy_object ✓"
-   - _Expected_: FUSE responds: "Understood. The stapler is now the load balancer."
-   - _Expected_: Proxy Objects tab updates with: stapler → load balancer
-
-5. Hold up the coffee mug and say:
-   > **"This coffee mug is our primary database"**
-   - _Expected_: Connection log shows "TOOL: set_proxy_object ✓"
-   - _Expected_: FUSE acknowledges the assignment
-
-6. Hold up the phone and say:
-   > **"This phone is the API gateway"**
-   - _Expected_: Another "TOOL: set_proxy_object ✓" in the log
-
-7. Hold up the pen and say:
-   > **"This pen is the cache layer"**
-   - _Expected_: Fourth proxy registered
-
-8. Verify all proxies by asking:
-   > **"What objects have been assigned so far?"**
-   - _Expected_: Connection log shows "TOOL: get_session_context ✓"
-   - _Expected_: FUSE lists all 4 proxy assignments via audio
+1. Pick up another object (e.g., a pen)
+2. Say: **"And this pen is our message queue between the API gateway and the database."**
+3. Watch for:
+   - `TOOL CALL: set_proxy_object({"object_name":"pen","technical_role":"message queue"})`
+4. The proxy table updates with the new assignment
 
 ---
 
-## Phase 4: Spatial Architecture with Function Calling
+## Step 3: Ask About Context
 
-Now arrange the objects to represent your architecture and ask FUSE to analyze the layout.
-
-9. Arrange the objects on the table:
-   - Phone (API Gateway) on the left
-   - Stapler (Load Balancer) in the middle
-   - Coffee mug (Database) and Pen (Cache) on the right side
-
-10. Point the camera at the arrangement and say:
-    > **"FUSE, look at the table. Can you see how the objects are arranged and describe the architecture?"**
-    - _Expected_: Connection log shows "TOOL: capture_and_analyze_frame ✓"
-    - _Expected_: FUSE describes the spatial layout: "I can see the API gateway on the left, connecting through the load balancer in the center, which routes to the database and cache on the right..."
-    - _Expected_: Diagram panel updates with a Mermaid diagram reflecting the arrangement
-
-11. Ask for refinement:
-    > **"The API gateway should connect to the load balancer, and the load balancer should connect to both the database and the cache. The cache sits in front of the database."**
-    - _Expected_: FUSE acknowledges and the vision pipeline captures the relationship context
-    - _Expected_: Diagram updates with the correct topology
-
-12. Move an object and describe the change:
-    > **"I'm moving the cache next to the database. The cache should sit between the load balancer and the database."**
-    - _Expected_: FUSE acknowledges the topology change
+1. Say: **"What objects have we assigned so far? And what does our current architecture look like?"**
+2. Watch for:
+   - `TOOL CALL: get_session_context({})` — Gemini retrieves session state
+3. Gemini should describe the proxy assignments and any diagram that has been generated
 
 ---
 
-## Phase 5: Architecture Validation
+## Step 4: Build the Architecture
 
-13. Ask verbally:
-    > **"Validate this architecture. Does it have any bottlenecks or single points of failure?"**
-    - _Expected_: FUSE discusses potential issues
-    - _Expected_: Example: "The load balancer is a single point of failure. Consider adding a secondary load balancer for redundancy."
-
-14. Or click **"Run Validation"** in the bottom-right panel
-    - _Expected_: Written validation report with specific findings
+1. Say: **"Based on these components, can you design a microservices architecture diagram?"**
+2. Gemini generates a Mermaid diagram incorporating the proxy objects
+3. The Architecture Diagram tab updates automatically
+4. Workflow status shows validation → visualization → animation progress
 
 ---
 
-## Phase 6: Visualization (Imagen)
+## What to Watch For
 
-15. Click **"Visualize"** in the diagram panel
-    - _Expected_: Photorealistic image generates (10-30 seconds)
-    - _Expected_: You see visual metaphors for each component:
-      - Load balancer → traffic control structure
-      - Database → vault with data streams
-      - API gateway → ornate gateway arch
-      - Cache → high-speed relay station
-
----
-
-## Phase 7: Animation (Veo 3)
-
-16. Click **"Animate"** in the diagram panel
-    - _Expected_: Animated walkthrough generates (30-120 seconds)
-    - _Expected_: Video shows data flowing through the architecture components
-
----
-
-## Phase 8: End Session
-
-17. Click **"End Session"**
-    - _Expected_: "WebSocket closed: Normal closure" (code 1000)
-    - _Expected_: Post-session overlay with session summary
-
----
-
-## What to Check in the Connection Log
-
-| Entry | Meaning |
-|-------|---------|
-| `TOOL: set_proxy_object ✓ (XXXms)` | Proxy registered via function call |
-| `TOOL: capture_and_analyze_frame ✓ (XXXms)` | Vision captured objects on demand |
-| `TOOL: get_session_context ✓ (XXXms)` | Session state retrieved |
-| `Audio session reconnected` | Auto-reconnect worked (issue #18) |
-
-## What to Check in the Proxy Objects Tab
-
-After all registrations, you should see:
-
-| Object | Technical Role |
-|--------|---------------|
-| stapler | load balancer |
-| coffee mug | primary database |
-| phone | API gateway |
-| pen | cache layer |
+- Gemini speaks first — no need for you to initiate
+- Gemini automatically selects "imagine" mode when you mention objects on desk
+- Proxy objects appear in the Session Notes tab as they're registered
+- No manual mode switching needed — Gemini picks the right mode from the function call description
+- `TOOL CALL` and `TOOL RESULT` messages confirm function calling is working

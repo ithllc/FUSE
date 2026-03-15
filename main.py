@@ -79,8 +79,23 @@ def _resize_frame_for_live_api(frame_bytes: bytes) -> bytes:
 app = FastAPI(title="FUSE: Collaborative Brainstorming Intelligence API")
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_ui():
-    """Serves the FUSE web interface."""
+async def serve_ui(request: Request):
+    """Serves the FUSE web interface (ephemeral token mode — production default)."""
+    html_path = os.path.join(os.path.dirname(__file__), "static", "index_ephemeral_tokens.html")
+    if not os.path.exists(html_path):
+        # Fallback to original page if ephemeral page not found
+        html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    logger.info(
+        f"EVENT=ephemeral_page_served"
+        f" | client_ip={request.client.host}"
+        f" | user_agent={request.headers.get('user-agent', 'unknown')[:80]}"
+    )
+    with open(html_path, "r") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/server_to_server", response_class=HTMLResponse)
+async def serve_server_to_server_ui():
+    """Serves the original server-to-server FUSE web interface (Vertex AI proxy mode)."""
     html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     with open(html_path, "r") as f:
         return HTMLResponse(content=f.read())
@@ -981,19 +996,11 @@ async def validate_architecture():
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-@app.get("/ephemeral", response_class=HTMLResponse)
-async def serve_ephemeral_ui(request: Request):
-    """Serves the ephemeral token alternate page for direct Gemini Live API access."""
-    html_path = os.path.join(os.path.dirname(__file__), "static", "index_ephemeral_tokens.html")
-    if not os.path.exists(html_path):
-        return HTMLResponse(content="<h1>Ephemeral token page not found</h1>", status_code=404)
-    logger.info(
-        f"EVENT=ephemeral_page_served"
-        f" | client_ip={request.client.host}"
-        f" | user_agent={request.headers.get('user-agent', 'unknown')[:80]}"
-    )
-    with open(html_path, "r") as f:
-        return HTMLResponse(content=f.read())
+@app.get("/ephemeral")
+async def redirect_ephemeral():
+    """Redirects /ephemeral to / (ephemeral is now the default)."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/", status_code=301)
 
 @app.get("/api/ephemeral-token")
 async def create_ephemeral_token(request: Request):

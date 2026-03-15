@@ -1338,54 +1338,97 @@ Powered by Gemini 3.1 Pro Preview.</div>
                                 addMsg('system', 'TOOL CALL: ' + funcName + '(' + JSON.stringify(funcArgs) + ')');
                                 addConnectionLog('TOOL: ' + funcName + ' called with ' + JSON.stringify(funcArgs), 'info');
 
-                                // === STUB START (replace with real HTTP calls for production) ===
+                                // === PRODUCTION: Real HTTP calls to server endpoints ===
                                 let result = {};
 
-                                if (funcName === 'capture_and_analyze_frame') {
-                                    const mode = funcArgs.mode || 'auto';
-                                    // Production: fetch(BASE + '/vision/frame?mode=' + mode, { method: 'POST', body: latestFrameBlob })
-                                    result = {
-                                        status: 'success',
-                                        scene_type: mode === 'auto' ? 'whiteboard' : mode,
-                                        mermaid_code: 'graph TD\\n  A[Client] --> B[Server]',
-                                        mermaid_length: 35,
-                                        description: 'Stub: Captured and analyzed frame in ' + mode + ' mode. Scene detected as ' + (mode === 'auto' ? 'whiteboard' : mode) + '.'
-                                    };
-                                    addMsg('system', 'TOOL RESULT: Vision capture (' + mode + ' mode) — ' + result.description);
+                                try {
+                                    if (funcName === 'capture_and_analyze_frame') {
+                                        const mode = funcArgs.mode || 'auto';
+                                        // Capture latest frame from camera and send to vision pipeline
+                                        const video = document.getElementById('localVideo');
+                                        const canvas = document.getElementById('captureCanvas');
+                                        if (video && video.videoWidth && cameraStream) {
+                                            canvas.width = 640;
+                                            canvas.height = 480;
+                                            const ctx = canvas.getContext('2d');
+                                            ctx.drawImage(video, 0, 0, 640, 480);
+                                            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+                                            if (blob) {
+                                                const resp = await fetch(BASE + '/vision/frame?mode=' + mode, {
+                                                    method: 'POST',
+                                                    body: blob,
+                                                    headers: { 'Content-Type': 'application/octet-stream' },
+                                                    signal: AbortSignal.timeout(15000)
+                                                });
+                                                const data = await resp.json();
+                                                if (data.status === 'success') {
+                                                    result = {
+                                                        status: 'success',
+                                                        scene_type: mode,
+                                                        mermaid_length: data.mermaid_length || 0,
+                                                        description: 'Captured and analyzed frame in ' + mode + ' mode. Mermaid output: ' + (data.mermaid_length || 0) + ' chars.'
+                                                    };
+                                                    // Refresh diagram if mermaid was generated
+                                                    if (data.mermaid_length > 0) refreshMermaid();
+                                                } else {
+                                                    result = { status: 'error', description: data.message || 'Vision processing failed' };
+                                                }
+                                            } else {
+                                                result = { status: 'error', description: 'Failed to capture camera frame' };
+                                            }
+                                        } else {
+                                            result = { status: 'no_frame', description: 'Camera not active or no video available.' };
+                                        }
+                                        addMsg('system', 'TOOL RESULT: Vision capture (' + mode + ') — ' + (result.description || result.status));
 
-                                } else if (funcName === 'get_session_context') {
-                                    // Production: fetch(BASE + '/state/mermaid') + fetch(BASE + '/health')
-                                    result = {
-                                        status: 'success',
-                                        proxy_objects: Object.keys(proxyRegistry).length > 0 ? proxyRegistry : 'No objects assigned yet.',
-                                        current_diagram: 'No diagram yet (stub mode).',
-                                        diagram_length: 0,
-                                        recent_transcript: 'Stub: transcript not available locally.',
-                                        vision_mode: 'auto'
-                                    };
-                                    addMsg('system', 'TOOL RESULT: Session context retrieved (stub)');
-
-                                } else if (funcName === 'set_proxy_object') {
-                                    const objName = funcArgs.object_name || '';
-                                    const techRole = funcArgs.technical_role || '';
-                                    if (objName && techRole) {
-                                        // Production: fetch(BASE + '/command?text=' + encodeURIComponent(objName + ' is our ' + techRole), { method: 'POST' })
-                                        proxyRegistry[objName] = techRole;
-                                        updateProxyTable();
+                                    } else if (funcName === 'get_session_context') {
+                                        // Fetch current diagram + session health
+                                        const [mermaidResp, healthResp] = await Promise.all([
+                                            fetch(BASE + '/state/mermaid', { signal: AbortSignal.timeout(10000) }).catch(() => null),
+                                            fetch(BASE + '/health', { signal: AbortSignal.timeout(10000) }).catch(() => null)
+                                        ]);
+                                        const mermaidData = mermaidResp ? await mermaidResp.json().catch(() => ({})) : {};
+                                        const healthData = healthResp ? await healthResp.json().catch(() => ({})) : {};
                                         result = {
                                             status: 'success',
-                                            description: 'Registered ' + objName + ' as ' + techRole + '.',
-                                            proxy_registry: proxyRegistry
+                                            proxy_objects: Object.keys(proxyRegistry).length > 0 ? proxyRegistry : 'No objects assigned yet.',
+                                            current_diagram: mermaidData.mermaid_code || 'No diagram yet.',
+                                            diagram_length: mermaidData.mermaid_code ? mermaidData.mermaid_code.length : 0,
+                                            vision_mode: 'auto',
+                                            system_status: healthData.status || 'unknown'
                                         };
-                                        addMsg('system', 'TOOL RESULT: Proxy registered — ' + objName + ' → ' + techRole);
-                                    } else {
-                                        result = { status: 'error', description: 'Missing object_name or technical_role.' };
-                                    }
+                                        addMsg('system', 'TOOL RESULT: Session context retrieved (diagram: ' + result.diagram_length + ' chars, proxies: ' + Object.keys(proxyRegistry).length + ')');
 
-                                } else {
-                                    result = { status: 'error', description: 'Unknown function: ' + funcName };
+                                    } else if (funcName === 'set_proxy_object') {
+                                        const objName = funcArgs.object_name || '';
+                                        const techRole = funcArgs.technical_role || '';
+                                        if (objName && techRole) {
+                                            // Register locally
+                                            proxyRegistry[objName] = techRole;
+                                            updateProxyTable();
+                                            // Also register on server via command endpoint
+                                            fetch(BASE + '/command?text=' + encodeURIComponent(objName + ' is our ' + techRole), {
+                                                method: 'POST',
+                                                signal: AbortSignal.timeout(5000)
+                                            }).catch(() => {}); // Fire-and-forget
+                                            result = {
+                                                status: 'success',
+                                                description: 'Registered ' + objName + ' as ' + techRole + '.',
+                                                proxy_registry: proxyRegistry
+                                            };
+                                            addMsg('system', 'TOOL RESULT: Proxy registered — ' + objName + ' → ' + techRole);
+                                        } else {
+                                            result = { status: 'error', description: 'Missing object_name or technical_role.' };
+                                        }
+
+                                    } else {
+                                        result = { status: 'error', description: 'Unknown function: ' + funcName };
+                                    }
+                                } catch (toolErr) {
+                                    result = { status: 'error', description: 'Tool execution error: ' + toolErr.message };
+                                    addMsg('system', 'TOOL ERROR: ' + funcName + ' — ' + toolErr.message);
                                 }
-                                // === STUB END ===
+                                // === END PRODUCTION ===
 
                                 // Send tool response back to Gemini
                                 const toolResponse = {

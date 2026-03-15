@@ -103,11 +103,25 @@ The web UI is a four-panel interface:
 +---------------------+---------------------+
 ```
 
-### Connecting to the Live Session
+### Starting a Session
 
-1. Click **"Connect Live"** in the header bar — the status badge turns green ("Live")
-2. Click **"Start Mic"** to enable voice input — a red pulsing indicator appears
-3. Click **"Start Camera"** to enable video capture — the camera feed appears in the top-left panel
+1. Wait for the splash page to show "Ready — Enter FUSE" (components are loading)
+2. Click **"Ready — Enter FUSE"** to enter the main interface
+3. Wait for the component health panel to show all components loaded
+4. Click **"Start Session"** — the button enables after components load
+5. Grant microphone and camera permissions when prompted (~2 second permission check)
+6. Wait ~10 seconds — **FUSE greets you first** with audio (no need to speak first)
+7. The status badge turns green ("Connected") and camera/mic activate automatically
+8. Video streams to Gemini at 1 FPS for real-time visual awareness
+
+### Voice Interaction
+
+1. Simply speak naturally after FUSE greets you
+2. FUSE responds with audio and transcripts appear in the chat panel
+3. Gemini automatically calls functions when you reference visual content:
+   - "Look at my whiteboard" → triggers `capture_and_analyze_frame(whiteboard)`
+   - "The cup is our database" → triggers `set_proxy_object(cup, database)`
+   - "What have we assigned?" → triggers `get_session_context()`
 
 ### Sending Text Messages
 
@@ -230,7 +244,7 @@ FUSE uses a **two-pass vision pipeline** for intelligent scene understanding:
 
 ### Vision Modes
 
-Use the **Vision Mode** dropdown in the camera panel header to control how frames are processed:
+Gemini automatically selects the appropriate vision mode based on your conversation context. The modes are:
 
 | Mode | Behavior |
 |------|----------|
