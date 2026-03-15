@@ -676,7 +676,7 @@
             <span>Collaborative Brainstorming Intelligence</span>
         </div>
         <div class="btn-group">
-            <button class="btn btn-sm" style="background:#da3633;border-color:#da3633;color:#fff;" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
+            <button class="btn btn-sm" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
             <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Start Session</button>
             <div class="status-badge disconnected" id="statusBadge">
                 <div class="status-dot"></div>
@@ -838,7 +838,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
     <!-- System Status Panel — collapsed at bottom (issue #36) -->
     <div id="statusBottomBar" style="position:fixed; bottom:0; left:0; right:0; z-index:50;">
-        <div onclick="toggleSystemStatus()" style="background:#da3633; color:#fff; text-align:center; padding:10px 16px; cursor:pointer; font-size:15px; font-weight:600; user-select:none;">
+        <div onclick="toggleSystemStatus()" style="background:#1C2129; color:#c9d1d9; text-align:center; padding:10px 16px; cursor:pointer; font-size:15px; font-weight:600; user-select:none; border-top:1px solid #30363d;">
             Status <span id="statusChevron" style="display:inline-block; transition:transform 0.2s;">&#9660;</span>
         </div>
         <div id="systemStatusPanel" style="display:none; background:#161b22; border-top:1px solid #30363d; max-height:280px; overflow-y:auto;">
