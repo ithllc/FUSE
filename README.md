@@ -248,15 +248,15 @@ FUSE/
 ## Demonstration
 
 ### Web UI
+[![FUSE Interface](/docs/submission/FUSE-UI-V3.png)]([target-url](https://fuse-service-864533297567.us-central1.run.app/))
 
 The four-panel interface provides simultaneous access to:
 
 | Panel | Function |
 |-------|----------|
 | **Top-Left** | Live camera feed with vision mode selector and frame capture |
-| **Top-Right** | Architecture output with 4 tabs: Diagram, Validation, Visualized Image, Animated Video |
 | **Bottom-Left** | Chat transcript + proxy object registry |
-| **Bottom-Right** | System status panel with component health and connection log |
+| **Right** | Architecture output with 4 tabs: Diagram, Validation, Visualized Image, Animated Video |
 
 The right panel tabs activate progressively as the auto-workflow completes each step — providing real-time visibility into system processing.
 
