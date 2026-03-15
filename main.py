@@ -289,6 +289,80 @@ async def websocket_endpoint(websocket: WebSocket):
     client_connected = True
     MAX_RECONNECTS = 10
 
+    # --- Transcript aggregation (issue #37) ---
+    # Buffer partial transcriptions per role, aggregate into full sentences
+    _transcript_buf = {"user": [], "fuse": []}
+    _transcript_timers = {"user": None, "fuse": None}
+    TRANSCRIPT_DEBOUNCE_S = 1.5  # Wait 1.5s after last partial before aggregating
+
+    async def _aggregate_and_send(role: str):
+        """Aggregate buffered transcript fragments into clean sentences via Gemini."""
+        fragments = _transcript_buf[role]
+        if not fragments:
+            return
+        raw_text = " ".join(fragments)
+        _transcript_buf[role] = []
+
+        # Use Gemini flash-lite to clean up into proper sentences
+        clean_text = raw_text
+        try:
+            if vision_capture and vision_capture.client:
+                from google.genai import types as gtypes
+                resp = vision_capture.client.models.generate_content(
+                    model="gemini-3.1-flash-lite-preview",
+                    contents=[gtypes.Content(role="user", parts=[
+                        gtypes.Part.from_text(
+                            text=(
+                                "The following is a raw speech-to-text transcription split into fragments. "
+                                "Combine them into one or more proper, readable sentences. "
+                                "Fix punctuation and capitalization. Do NOT add any new information. "
+                                "Output ONLY the corrected text, nothing else.\n\n"
+                                f"Fragments: {raw_text}"
+                            )
+                        )
+                    ])],
+                    config=gtypes.GenerateContentConfig(
+                        response_mime_type="text/plain",
+                        temperature=1.0,
+                    ),
+                )
+                if resp.text:
+                    clean_text = resp.text.strip()
+        except Exception as e:
+            logger.warning(f"Transcript aggregation failed, using raw: {e}")
+            clean_text = raw_text
+
+        # Store in Redis
+        if state_manager:
+            try:
+                state_manager.log_event("transcript", {"role": role, "text": clean_text})
+            except Exception:
+                pass
+
+        # Send aggregated text to frontend
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "transcript_aggregated",
+                "role": role,
+                "text": clean_text,
+            }))
+        except Exception:
+            pass
+
+    async def _debounced_aggregate(role: str):
+        """Schedule aggregation after debounce period."""
+        await asyncio.sleep(TRANSCRIPT_DEBOUNCE_S)
+        await _aggregate_and_send(role)
+
+    def _buffer_transcript(role: str, text: str):
+        """Buffer a partial transcript fragment and schedule aggregation."""
+        _transcript_buf[role].append(text.strip())
+        # Cancel previous debounce timer
+        if _transcript_timers[role] is not None:
+            _transcript_timers[role].cancel()
+        # Schedule new debounce
+        _transcript_timers[role] = asyncio.ensure_future(_debounced_aggregate(role))
+
     try:
         # Stage: connecting to Gemini
         await websocket.send_text(json.dumps({
@@ -697,37 +771,25 @@ async def websocket_endpoint(websocket: WebSocket):
                                     sc = response.server_content
 
                                     # Input transcription (what the user said)
+                                    # Buffer partials → aggregate via Gemini → send clean sentences (issue #37)
                                     if hasattr(sc, 'input_transcription') and sc.input_transcription:
                                         t = sc.input_transcription
                                         if hasattr(t, 'text') and t.text:
-                                            await websocket.send_text(json.dumps({
-                                                "type": "transcript",
-                                                "role": "user",
-                                                "text": t.text,
-                                                "finished": getattr(t, 'finished', False)
-                                            }))
-                                            if state_manager and getattr(t, 'finished', False):
+                                            _buffer_transcript("user", t.text)
+                                            if getattr(t, 'finished', False):
                                                 try:
-                                                    state_manager.log_event("voice_input", {"text": t.text})
+                                                    if state_manager:
+                                                        state_manager.log_event("voice_input", {"text": t.text})
                                                     await _check_voice_commands(t.text)
                                                 except Exception:
-                                                    pass  # Redis down — don't crash audio pipeline
+                                                    pass
 
                                     # Output transcription (what Gemini said)
+                                    # Buffer partials → aggregate via Gemini → send clean sentences (issue #37)
                                     if hasattr(sc, 'output_transcription') and sc.output_transcription:
                                         t = sc.output_transcription
                                         if hasattr(t, 'text') and t.text:
-                                            await websocket.send_text(json.dumps({
-                                                "type": "transcript",
-                                                "role": "fuse",
-                                                "text": t.text,
-                                                "finished": getattr(t, 'finished', False)
-                                            }))
-                                            if state_manager and getattr(t, 'finished', False):
-                                                try:
-                                                    state_manager.log_event("gemini_output", {"text": t.text})
-                                                except Exception:
-                                                    pass  # Redis down — don't crash audio pipeline
+                                            _buffer_transcript("fuse", t.text)
 
                                     if hasattr(sc, 'model_turn') and sc.model_turn and sc.model_turn.parts:
                                         for part in sc.model_turn.parts:
