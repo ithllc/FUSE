@@ -38,12 +38,22 @@ FUSE is a multimodal AI brainstorming partner that sees, hears, and collaborates
 
 ## Architecture
 
+FUSE supports two architecture modes. The **Ephemeral Token** mode is the production default.
+
+### Ephemeral Token Mode (Production — `/ephemeral`)
+
+Direct browser-to-Gemini audio/video via ephemeral tokens. Zero server-side audio relay.
+
 ```
-Browser / Python Client
+Browser
     │
-    ├── WebSocket /live ──────────► Gemini Live API (Audio + Video + Function Calling)
-    │     (audio PCM + video JPEG)    gemini-2.5-flash-native-audio
-    │                                 Video: 1 FPS, 768x768 — real-time awareness
+    ├── WSS (direct) ─────────────► Gemini Live API (Audio + Video + Function Calling)
+    │     ephemeral token auth        gemini-2.5-flash-native-audio-latest
+    │     audio PCM + video JPEG      Handles: capture_and_analyze_frame,
+    │     + function calling            get_session_context, set_proxy_object
+    │
+    ├── GET /api/ephemeral-token ─► FastAPI ──► Gemini API (token generation)
+    │                                            GEMINI_API_KEY via Secret Manager
     │
     ├── POST /vision/frame ───────► VisionStateCapture (Two-Pass Pipeline)
     │     (JPEG, 0.5 FPS)            gemini-3.1-flash-lite-preview
@@ -62,6 +72,21 @@ Browser / Python Client
                                      DiagramRenderer
                                        (Mermaid CLI)
 ```
+
+### Server-to-Server Mode (Legacy — `/`)
+
+Server proxies audio between browser and Vertex AI. Used for enterprise deployments with IAM controls.
+
+```
+Browser
+    │
+    ├── WebSocket /live ──────────► FastAPI ──► Vertex AI Live API
+    │     (binary audio PCM)          gemini-live-2.5-flash-native-audio
+    │
+    └── (same HTTP endpoints as above)
+```
+
+See [docs/architecture/README.md](docs/architecture/README.md) for detailed comparison.
 
 ### Component Overview
 
@@ -146,8 +171,12 @@ The build pipeline:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Web UI |
-| `/live` | WebSocket | Bidirectional audio+video streaming with function calling (dual pipeline) |
+| `/` | GET | Web UI (server-to-server mode) |
+| `/ephemeral` | GET | Web UI (ephemeral token mode — production) |
+| `/api/ephemeral-token` | GET | Generate ephemeral token for direct Gemini connection |
+| `/api/session-event` | POST | Client-side session lifecycle events for Cloud Logging |
+| `/api/tool-event` | POST | Client-side tool call telemetry for Cloud Logging |
+| `/live` | WebSocket | Server-proxied audio+video streaming (legacy mode) |
 | `/vision/frame` | POST | Submit camera frame for analysis (supports `?mode=` override) |
 | `/vision/mode` | GET/POST | Get or set vision mode (`auto`, `whiteboard`, `imagine`, `charades`) |
 | `/state/mermaid` | GET | Current architecture state (Mermaid code) |
@@ -168,7 +197,8 @@ The build pipeline:
 FUSE/
 ├── main.py                          # FastAPI server and endpoints
 ├── client_streamer.py               # Python CLI client (webcam + mic)
-├── static/index.html                # Web UI
+├── static/index.html                # Web UI (server-to-server mode)
+├── static/index_ephemeral_tokens.html  # Web UI (ephemeral token mode — production)
 ├── src/
 │   ├── audio/
 │   │   └── gemini_live_stream_handler.py   # Gemini Live API audio+video streaming
@@ -266,9 +296,11 @@ The test sends a shapes-only image through: `POST /vision/frame` → `GET /state
 
 ## Google Cloud Services Used
 
-- **Vertex AI** — Gemini model hosting and inference
+- **Vertex AI** — Gemini model hosting and inference (vision, validation, Imagen, Veo3)
+- **Gemini Developer API** — Ephemeral token generation for direct Live API access
 - **Cloud Run** — Serverless container deployment
 - **Cloud Memorystore** — Managed Redis for session state
+- **Secret Manager** — Secure storage for GEMINI_API_KEY
 - **Artifact Registry** — Docker image storage
 - **Cloud Build** — CI/CD pipeline
 - **Serverless VPC Access** — Network connectivity between Cloud Run and Memorystore

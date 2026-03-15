@@ -1,9 +1,11 @@
 <!DOCTYPE html>
+<!-- Copyright (c) 2026 ITH LLC. All rights reserved. -->
+<!-- Licensed under AGPL-3.0. See LICENSE file for details. -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FUSE - Collaborative Brainstorming Intelligence</title>
+    <title>FUSE - Collaborative Brainstorming Intelligence (Ephemeral Tokens)</title>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -600,8 +602,8 @@
             font-size: 12px;
             color: #484f58;
         }
-        @media (max-width: 700px) {
-            .splash-features { grid-template-columns: repeat(2, 1fr); }
+        @media (max-width: 900px) {
+            .splash-features { grid-template-columns: repeat(2, 1fr) !important; }
             .splash-brand h1 { font-size: 42px; }
         }
     </style>
@@ -614,7 +616,7 @@
             <div class="tagline">Collaborative Brainstorming Intelligence</div>
         </div>
 
-        <div class="splash-features">
+        <div class="splash-features" style="grid-template-columns: repeat(3, 1fr);">
             <div class="splash-feature">
                 <span class="feat-icon">&#127908;</span>
                 <h3>Live Audio</h3>
@@ -635,6 +637,16 @@
                 <h3>Instant Validation</h3>
                 <p>AI-powered proof orchestration catches design flaws live</p>
             </div>
+            <div class="splash-feature">
+                <span class="feat-icon">&#127912;</span>
+                <h3>Photorealistic Visualization</h3>
+                <p>AI-generated photorealistic images of your architecture using Imagen 4.0</p>
+            </div>
+            <div class="splash-feature">
+                <span class="feat-icon">&#127916;</span>
+                <h3>Animated Walkthroughs</h3>
+                <p>Dynamic video walkthroughs of your design powered by Veo 3.0</p>
+            </div>
         </div>
 
         <div class="splash-progress-area">
@@ -646,7 +658,7 @@
             <button id="splashStartBtn" onclick="dismissSplash()">Ready &mdash; Enter FUSE</button>
         </div>
 
-        <div class="splash-powered">Powered by Gemini 2.5 Flash &middot; Vertex AI &middot; Cloud Run</div>
+        <div class="splash-powered">Powered by Gemini 2.5 Flash Native Audio &middot; Ephemeral Tokens &middot; Cloud Run</div>
     </div>
 
     <header>
@@ -656,7 +668,7 @@
         </div>
         <div class="btn-group">
             <button class="btn btn-sm" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
-            <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()">Start Session</button>
+            <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()" disabled style="opacity:0.5;cursor:not-allowed;">Loading...</button>
             <div class="status-badge disconnected" id="statusBadge">
                 <div class="status-dot"></div>
                 <span id="statusText">Disconnected</span>
@@ -679,7 +691,7 @@
                     </div>
                 </div>
                 <div style="margin-top:12px;">
-                    <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Connection Log</h3>
+                    <h3 style="font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase;">Status Connection Log</h3>
                     <div id="connectionLog" style="font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; background:#0d1117; border-radius:6px; padding:8px; color:#8b949e;">
                         No events yet.
                     </div>
@@ -696,14 +708,15 @@
                 <div class="panel-header">
                     <h2>Live Camera Feed</h2>
                     <div class="btn-group">
-                        <select id="visionMode" onchange="setVisionMode(this.value)" style="background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;padding:4px 8px;cursor:pointer;">
+                        <!-- Vision mode dropdown hidden — Gemini selects mode via function calling (issue #31) -->
+                        <select id="visionMode" onchange="setVisionMode(this.value)" style="display:none;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;padding:4px 8px;cursor:pointer;">
                             <option value="auto" selected>Auto Detect</option>
                             <option value="whiteboard">Whiteboard</option>
                             <option value="imagine">Imagine (Objects)</option>
                             <option value="charades">Charades (Gestures)</option>
                         </select>
                         <span id="micIndicator" style="display:none;font-size:12px;color:#f85149;font-weight:500;">MIC LIVE</span>
-                        <button class="btn btn-sm" onclick="captureFrame()">Capture Frame</button>
+                        <!-- Capture Frame hidden — handled by Gemini function calling (issue #31) -->
                     </div>
                 </div>
                 <div class="panel-body" style="padding:8px;">
@@ -729,10 +742,8 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                         </svg>
                     </button>
-                    <!-- A/B test: Video-to-Gemini toggle (issue #26) -->
-                    <button class="media-btn" id="btnVideoGemini" onclick="toggleVideoToGemini()" title="Video streaming to Gemini: OFF — audio only (click to enable)" style="font-size:10px; padding:4px 8px; min-width:auto;">
-                        V⊘AI
-                    </button>
+                    <!-- Video-to-Gemini: always ON for ephemeral token page (issue #31) -->
+                    <!-- A/B toggle hidden — no longer needed with direct connection -->
                 </div>
             </div>
 
@@ -778,11 +789,8 @@
                     <div class="tab disabled" id="tabVisualizedImage" onclick="switchArchTab('visualized')">Visualized Image</div>
                     <div class="tab disabled" id="tabAnimatedVideo" onclick="switchArchTab('animated')">Animated Video</div>
                 </div>
-                <div class="btn-group">
-                    <button class="btn btn-sm btn-blue" id="btnVisualize" onclick="generateRealistic()">Visualize</button>
-                    <button class="btn btn-sm btn-blue" id="btnAnimate" onclick="generateAnimation()">Animate</button>
-                    <button class="btn btn-sm btn-blue" onclick="runValidation()">Validate</button>
-                </div>
+                <!-- Workflow status display — replaces manual buttons (issue #31) -->
+                <div id="workflowStatus" style="font-size:11px; color:#8b949e; max-width:280px; text-align:right; line-height:1.6;"></div>
             </div>
             <div class="panel-body" style="padding:8px;">
                 <!-- Diagram view (default) -->
@@ -875,6 +883,23 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
         const BASE = window.location.origin;
 
+        // --- Session event reporting for server-side logging (issue #30) ---
+        let _sessionStartTime = 0;
+
+        function reportSessionEvent(event, extraData) {
+            const payload = JSON.stringify({ event: event, ...extraData });
+            if (event === 'session_disconnect') {
+                navigator.sendBeacon(BASE + '/api/session-event', payload);
+            } else {
+                fetch(BASE + '/api/session-event', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload,
+                    keepalive: true
+                }).catch(() => {});
+            }
+        }
+
         // --- Splash / Landing Page ---
         (function initSplash() {
             const SPLASH_SECONDS = 15;
@@ -894,6 +919,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         serviceReady = true;
                         statusEl.textContent = 'Services ready';
                         clearInterval(healthPoll);
+                        // Trigger component health check — button enables after components load
+                        refreshSystemStatus();
                     }
                 } catch (_) { /* still warming up */ }
             }, 2000);
@@ -935,8 +962,14 @@ Powered by Gemini 3.1 Pro Preview.</div>
             overlay.classList.add('hidden');
             // Remove from DOM after transition
             setTimeout(() => overlay.remove(), 700);
+            // Show Status panel so user sees component loading
+            document.getElementById('systemStatusPanel').style.display = 'block';
+            // Trigger component health check if not already done
+            refreshSystemStatus();
         }
-        const WS_URL = BASE.replace('http://', 'ws://').replace('https://', 'wss://') + '/live';
+        // Direct Gemini WebSocket (ephemeral token auth — no server proxy)
+        const GEMINI_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
+        const GEMINI_MODEL = 'models/gemini-2.5-flash-native-audio-latest';
         let ws = null;
         let cameraStream = null;
         let frameInterval = null;
@@ -962,7 +995,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
         // --- A/B test: Video-to-Gemini toggle (issue #26) ---
         // Default OFF — continuous video frames cause Gemini audio stalls.
         // Vision is available on-demand via function calling (issue #19).
-        let videoToGeminiEnabled = false;
+        let videoToGeminiEnabled = true; // Always ON for ephemeral token page (issue #31)
 
         function toggleVideoToGemini() {
             videoToGeminiEnabled = !videoToGeminiEnabled;
@@ -976,10 +1009,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 btn.textContent = 'V⊘AI';
                 btn.title = 'Video streaming to Gemini: OFF — audio only (click to enable)';
             }
-            // Send toggle command to server
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'video_toggle', enabled: videoToGeminiEnabled }));
-            }
+            // No server toggle needed — direct Gemini connection handles video locally
             const mode = videoToGeminiEnabled ? 'ON (audio+video → Gemini)' : 'OFF (audio only → Gemini)';
             addConnectionLog('A/B TEST: Video to Gemini ' + mode, 'info');
             addMsg('system', 'A/B Test — Video to Gemini: ' + mode);
@@ -1042,206 +1072,429 @@ Powered by Gemini 3.1 Pro Preview.</div>
             showSessionOverlay();
         }
 
-        function connectWebSocket() {
-            addMsg('system', 'Connecting to FUSE Live...');
-            addConnectionLog('Opening WebSocket to ' + WS_URL, 'info');
-            ws = new WebSocket(WS_URL);
-            ws.binaryType = 'arraybuffer';
+        async function connectWebSocket() {
+            addMsg('system', 'Requesting ephemeral token...');
+            addConnectionLog('Fetching ephemeral token from server...', 'info');
 
-            ws.onopen = () => {
-                sessionState = 'diagnostics';
-                setStatus(true);
-                addConnectionLog('WebSocket connected', 'ok');
-                addMsg('system', 'Connected. Preparing diagnostics...');
-                document.getElementById('btnConnect').textContent = 'End Session';
-                document.getElementById('btnConnect').style.background = '#da3633';
-                document.getElementById('btnConnect').style.borderColor = '#f85149';
-                // Sync vision mode selector with server state
-                fetchVisionMode();
-                // Auto-activate camera and mic — needed for diagnostic tests
-                if (!cameraStream) toggleCamera();
-                if (!micActive) toggleMic();
-                // Reset diagnostic state
-                diagChecks = { audioOutput: false, micInput: false, camera: false };
-                diagAudioChunks = 0;
-                diagLastAudioTime = 0;
-                diagFirstBurstDone = false;
-                // Run camera diagnostic after brief delay (camera needs time to initialize)
-                setTimeout(runCameraDiagnostic, 2000);
-                // 3-2-1 countdown then prompt user to speak
-                runDiagCountdown();
-            };
+            try {
+                // Step 1: Get ephemeral token from our server
+                const tokenResp = await fetch(BASE + '/api/ephemeral-token');
+                const tokenData = await tokenResp.json();
 
-            ws.onmessage = (event) => {
-                if (typeof event.data === 'string') {
+                if (tokenData.status !== 'ok' || !tokenData.token) {
+                    addMsg('system', 'Failed to get token: ' + (tokenData.message || 'Unknown error'));
+                    addConnectionLog('Token error: ' + (tokenData.message || 'Unknown error'), 'error');
+                    return;
+                }
+
+                addConnectionLog('Token received. Connecting to Gemini directly...', 'ok');
+
+                // Step 2: Connect directly to Gemini Live API
+                const wsUrl = GEMINI_WS_BASE + '?access_token=' + encodeURIComponent(tokenData.token);
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    addConnectionLog('WebSocket connected to Gemini. Sending setup...', 'ok');
+
+                    // Step 3: Send setup message
+                    const setupMsg = {
+                        setup: {
+                            model: GEMINI_MODEL,
+                            generationConfig: {
+                                responseModalities: ['AUDIO'],
+                                speechConfig: {
+                                    voiceConfig: {
+                                        prebuiltVoiceConfig: {
+                                            voiceName: 'Puck'
+                                        }
+                                    }
+                                }
+                            },
+                            realtimeInputConfig: {
+                                automaticActivityDetection: {
+                                    startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+                                    endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+                                    prefixPaddingMs: 20,
+                                    silenceDurationMs: 500
+                                }
+                            },
+                            inputAudioTranscription: {},
+                            outputAudioTranscription: {},
+                            tools: [{
+                                functionDeclarations: [
+                                    {
+                                        name: 'capture_and_analyze_frame',
+                                        description: 'Captures the latest camera frame and analyzes it through the vision pipeline. Use this when the user asks you to look at, describe, or analyze what the camera sees (e.g., "do you see the whiteboard?", "what objects are on the table?", "look at this sketch"). Returns the scene type, any extracted Mermaid diagram code, and a description of what was found.',
+                                        parameters: {
+                                            type: 'object',
+                                            properties: {
+                                                mode: {
+                                                    type: 'string',
+                                                    enum: ['auto', 'whiteboard', 'imagine', 'charades'],
+                                                    description: "Vision processing mode. Use 'whiteboard' when the user mentions a whiteboard, paper, sketch, or diagram. Use 'imagine' when the user asks about physical objects on a table or desk. Use 'charades' when the user is gesturing or acting something out. Use 'auto' to let the system detect the scene type automatically."
+                                                }
+                                            },
+                                            required: []
+                                        }
+                                    },
+                                    {
+                                        name: 'get_session_context',
+                                        description: 'Retrieves the current session state including proxy object assignments, the current architecture diagram, and recent transcript history. Use this when you need to recall what objects have been assigned, what the current architecture looks like, or what was discussed recently.',
+                                        parameters: {
+                                            type: 'object',
+                                            properties: {}
+                                        }
+                                    },
+                                    {
+                                        name: 'set_proxy_object',
+                                        description: 'Registers a physical object as a proxy for an architecture component. Use this when the user assigns a role to an object (e.g., "this stapler is our load balancer", "the cup is the database"). This updates the proxy registry used by the vision pipeline.',
+                                        parameters: {
+                                            type: 'object',
+                                            properties: {
+                                                object_name: {
+                                                    type: 'string',
+                                                    description: 'The physical object being assigned (e.g., "stapler", "cup", "phone").'
+                                                },
+                                                technical_role: {
+                                                    type: 'string',
+                                                    description: 'The architecture component it represents (e.g., "load balancer", "database", "API gateway").'
+                                                }
+                                            },
+                                            required: ['object_name', 'technical_role']
+                                        }
+                                    }
+                                ]
+                            }]
+                        }
+                    };
+
+                    ws.send(JSON.stringify(setupMsg));
+                    addConnectionLog('Setup sent (' + JSON.stringify(setupMsg).length + ' bytes). Waiting for setupComplete...', 'info');
+
+                    // Timeout: if no setupComplete in 10s, something is wrong
+                    setTimeout(() => {
+                        if (sessionState !== 'diagnostics' && sessionState !== 'active') {
+                            addConnectionLog('TIMEOUT: No setupComplete after 10s. WebSocket readyState=' + (ws ? ws.readyState : 'null'), 'error');
+                        }
+                    }, 10000);
+                };
+
+                ws.onmessage = async (event) => {
+                    // Gemini sends JSON as binary WebSocket frames — decode to text
+                    let rawText;
+                    if (typeof event.data === 'string') {
+                        rawText = event.data;
+                    } else if (event.data instanceof Blob) {
+                        rawText = await event.data.text();
+                    } else if (event.data instanceof ArrayBuffer) {
+                        rawText = new TextDecoder().decode(event.data);
+                    } else {
+                        console.warn('Unknown message type:', typeof event.data);
+                        return;
+                    }
+
                     try {
-                        const data = JSON.parse(event.data);
+                        const msg = JSON.parse(rawText);
 
-                        // Handle keepalive pings from server (issue #20)
-                        if (data.type === 'ping') {
+                        // Handle setupComplete — Gemini is ready
+                        if (msg.setupComplete) {
+                            setStatus(true);
+                            addConnectionLog('Gemini setup complete — direct audio active', 'ok');
+                            _sessionStartTime = Date.now();
+                            reportSessionEvent('session_connect', { detail: 'setupComplete received' });
+
+                            document.getElementById('btnConnect').textContent = 'End Session';
+                            document.getElementById('btnConnect').style.background = '#da3633';
+                            document.getElementById('btnConnect').style.borderColor = '#f85149';
+
+                            // Lightweight permission check — request mic + camera (issue #31)
+                            // Replaces full diagnostics (15-30s) with quick permission grant (~2s)
+                            addMsg('system', 'Connected. Checking permissions...');
+                            if (!cameraStream) toggleCamera();
+                            if (!micActive) toggleMic();
+
+                            // Brief delay to let permissions resolve, then go straight to active
+                            setTimeout(() => {
+                                const micOk = micActive;
+                                const camOk = !!cameraStream;
+                                const perms = [];
+                                if (micOk) perms.push('Mic: OK');
+                                else perms.push('Mic: denied');
+                                if (camOk) perms.push('Camera: OK');
+                                else perms.push('Camera: denied');
+                                addConnectionLog('Permissions: ' + perms.join(' | '), micOk ? 'ok' : 'error');
+                                addMsg('system', 'Permissions checked. ' + perms.join(', ') + '. Session active.');
+
+                                sessionState = 'active';
+                                addConnectionLog('Session active', 'ok');
+                                reportSessionEvent('session_active', {
+                                    detail: 'Permissions: ' + perms.join(', ')
+                                });
+
+                                // Start video streaming to Gemini
+                                if (cameraStream && ws && ws.readyState === WebSocket.OPEN) {
+                                    videoFrameInterval = setInterval(() => {
+                                        if (sessionState === 'active') sendVideoFrameWS();
+                                    }, 1000);
+                                    addConnectionLog('VIDEO: Streaming to Gemini at 1 FPS', 'ok');
+                                }
+
+                                // Start session timer
+                                startSessionTimer();
+
+                                // Trigger Gemini greeting after 10s
+                                setTimeout(() => {
+                                    if (ws && ws.readyState === WebSocket.OPEN && sessionState === 'active') {
+                                        ws.send(JSON.stringify({
+                                            realtimeInput: {
+                                                text: 'Hello, please greet me and let me know you are ready.'
+                                            }
+                                        }));
+                                        addConnectionLog('Greeting trigger sent', 'info');
+                                    }
+                                }, 10000);
+                            }, 2000);
+
                             return;
                         }
 
-                        // Handle A/B test video toggle acknowledgment (issue #26)
-                        if (data.type === 'video_toggle_ack') {
-                            addConnectionLog('SERVER: ' + data.message, 'ok');
-                            return;
-                        }
+                        // Handle serverContent (audio + transcriptions from Gemini)
+                        if (msg.serverContent) {
+                            const sc = msg.serverContent;
 
-                        // Handle latency instrumentation from server (issue #25)
-                        if (data.type === 'latency') {
-                            addConnectionLog(
-                                'LATENCY #' + data.n + ' (server): recv→gemini ' + data.server_recv_to_gemini + 'ms | gemini_think ' + data.gemini_processing + 'ms | send→browser ' + data.server_to_client + 'ms | server_total ' + data.total_server + 'ms',
-                                'info'
-                            );
-                            return;
-                        }
-
-                        // Handle video streaming status from server (issue #22)
-                        if (data.type === 'video_status') {
-                            if (data.frames_sent) {
-                                addConnectionLog('VIDEO: ' + data.frames_sent + ' frames sent', 'ok');
-                            } else if (data.message) {
-                                addConnectionLog(data.message, 'ok');
-                            }
-                            return;
-                        }
-
-                        // Handle structured status messages
-                        if (data.type === 'status') {
-                            addConnectionLog(data.message, 'ok');
-                            if (data.stage !== 'diagnostics') {
-                                addMsg('system', data.message);
-                            }
-                            return;
-                        }
-
-                        // Handle structured error messages
-                        if (data.type === 'error') {
-                            addConnectionLog('[' + data.stage + '] ' + data.message, 'error');
-                            addMsg('system', 'Error (' + data.stage + '): ' + data.message);
-                            return;
-                        }
-
-                        // Handle transcription messages (user speech + Gemini speech)
-                        if (data.type === 'transcript') {
-                            if (data.role === 'user') {
-                                addMsg('user', data.text);
-                                // Diagnostic: user speech detected via transcription
-                                if (sessionState === 'diagnostics' && !diagChecks.micInput && data.text.trim()) {
+                            // Input transcription (what the user said)
+                            if (sc.inputTranscription && sc.inputTranscription.text) {
+                                addMsg('user', sc.inputTranscription.text);
+                                if (sessionState === 'diagnostics' && !diagChecks.micInput
+                                    && sc.inputTranscription.text.trim()) {
                                     diagChecks.micInput = true;
-                                    addConnectionLog('DIAG: Microphone input PASS — speech transcribed: "' + data.text.substring(0, 40) + '"', 'ok');
+                                    addConnectionLog('DIAG: Microphone input PASS — speech transcribed: "'
+                                        + sc.inputTranscription.text.substring(0, 40) + '"', 'ok');
                                     addMsg('system', 'Diagnostic: Microphone working. Your speech was detected.');
                                     checkDiagComplete();
                                 }
-                            } else if (data.role === 'fuse') {
-                                addMsg('fuse', data.text);
-                                checkForMermaid(data.text);
                             }
-                            return;
-                        }
 
-                        // Handle voice command results (proxy, mode switch)
-                        if (data.type === 'command_result') {
-                            addMsg('system', data.text);
-                            // Update proxy table from server data
-                            if (data.proxies) {
-                                proxyRegistry = data.proxies;
-                                updateProxyTable();
+                            // Output transcription (what Gemini said)
+                            if (sc.outputTranscription && sc.outputTranscription.text) {
+                                addMsg('fuse', sc.outputTranscription.text);
+                                checkForMermaid(sc.outputTranscription.text);
                             }
-                            return;
+
+                            // Audio data in model turn
+                            if (sc.modelTurn && sc.modelTurn.parts) {
+                                for (const part of sc.modelTurn.parts) {
+                                    if (part.inlineData && part.inlineData.data) {
+                                        // Decode base64 to ArrayBuffer for playback
+                                        const binaryStr = atob(part.inlineData.data);
+                                        const bytes = new Uint8Array(binaryStr.length);
+                                        for (let i = 0; i < binaryStr.length; i++) {
+                                            bytes[i] = binaryStr.charCodeAt(i);
+                                        }
+                                        playAudioResponse(bytes.buffer);
+
+                                        // Latency instrumentation (client-side only — no server hop)
+                                        latencyAudioResponseCount++;
+                                        if (latencyExchangeOpen && latencyLastMicSendTs > 0) {
+                                            const rtt = Math.round(performance.now() - latencyLastMicSendTs);
+                                            latencyClientSamples.push(rtt);
+                                            if (latencyClientSamples.length > 50) latencyClientSamples.shift();
+                                            latencyExchangeOpen = false;
+                                            if (latencyAudioResponseCount <= 3 || latencyAudioResponseCount % 10 === 0) {
+                                                const avg = Math.round(latencyClientSamples.reduce((a,b) => a+b, 0) / latencyClientSamples.length);
+                                                addConnectionLog('LATENCY #' + latencyAudioResponseCount + ': browser→gemini→browser ' + rtt + 'ms (avg ' + avg + 'ms, n=' + latencyClientSamples.length + ')', 'info');
+                                            }
+                                        }
+
+                                        // Diagnostic: audio output working
+                                        if (sessionState === 'diagnostics' && !diagChecks.audioOutput) {
+                                            diagChecks.audioOutput = true;
+                                            addConnectionLog('DIAG: Audio output PASS — receiving audio from Gemini', 'ok');
+                                            addMsg('system', 'Diagnostic: Audio output working. FUSE is responding.');
+                                            checkDiagComplete();
+                                        }
+                                    }
+
+                                    // Text parts (if model sends text alongside audio)
+                                    if (part.text) {
+                                        addMsg('fuse', part.text);
+                                        checkForMermaid(part.text);
+                                    }
+                                }
+                            }
                         }
 
-                        // Handle tool activity notifications (issue #19)
-                        if (data.type === 'tool_activity') {
-                            const icon = data.status === 'success' ? '✓' : '✗';
-                            addConnectionLog('TOOL: ' + data.function + ' ' + icon + ' (' + data.latency_ms + 'ms)', data.status === 'success' ? 'ok' : 'error');
-                            return;
+                        // Handle tool calls from Gemini (function calling)
+                        if (msg.toolCall) {
+                            const toolCall = msg.toolCall;
+                            const functionCalls = toolCall.functionCalls || [];
+
+                            for (const fc of functionCalls) {
+                                const funcName = fc.name;
+                                const funcArgs = fc.args || {};
+                                const callId = fc.id;
+
+                                const _toolT0 = performance.now();
+                                addMsg('system', 'TOOL CALL: ' + funcName + '(' + JSON.stringify(funcArgs) + ')');
+                                addConnectionLog('TOOL: ' + funcName + ' called with ' + JSON.stringify(funcArgs), 'info');
+
+                                // === STUB START (replace with real HTTP calls for production) ===
+                                let result = {};
+
+                                if (funcName === 'capture_and_analyze_frame') {
+                                    const mode = funcArgs.mode || 'auto';
+                                    // Production: fetch(BASE + '/vision/frame?mode=' + mode, { method: 'POST', body: latestFrameBlob })
+                                    result = {
+                                        status: 'success',
+                                        scene_type: mode === 'auto' ? 'whiteboard' : mode,
+                                        mermaid_code: 'graph TD\\n  A[Client] --> B[Server]',
+                                        mermaid_length: 35,
+                                        description: 'Stub: Captured and analyzed frame in ' + mode + ' mode. Scene detected as ' + (mode === 'auto' ? 'whiteboard' : mode) + '.'
+                                    };
+                                    addMsg('system', 'TOOL RESULT: Vision capture (' + mode + ' mode) — ' + result.description);
+
+                                } else if (funcName === 'get_session_context') {
+                                    // Production: fetch(BASE + '/state/mermaid') + fetch(BASE + '/health')
+                                    result = {
+                                        status: 'success',
+                                        proxy_objects: Object.keys(proxyRegistry).length > 0 ? proxyRegistry : 'No objects assigned yet.',
+                                        current_diagram: 'No diagram yet (stub mode).',
+                                        diagram_length: 0,
+                                        recent_transcript: 'Stub: transcript not available locally.',
+                                        vision_mode: 'auto'
+                                    };
+                                    addMsg('system', 'TOOL RESULT: Session context retrieved (stub)');
+
+                                } else if (funcName === 'set_proxy_object') {
+                                    const objName = funcArgs.object_name || '';
+                                    const techRole = funcArgs.technical_role || '';
+                                    if (objName && techRole) {
+                                        // Production: fetch(BASE + '/command?text=' + encodeURIComponent(objName + ' is our ' + techRole), { method: 'POST' })
+                                        proxyRegistry[objName] = techRole;
+                                        updateProxyTable();
+                                        result = {
+                                            status: 'success',
+                                            description: 'Registered ' + objName + ' as ' + techRole + '.',
+                                            proxy_registry: proxyRegistry
+                                        };
+                                        addMsg('system', 'TOOL RESULT: Proxy registered — ' + objName + ' → ' + techRole);
+                                    } else {
+                                        result = { status: 'error', description: 'Missing object_name or technical_role.' };
+                                    }
+
+                                } else {
+                                    result = { status: 'error', description: 'Unknown function: ' + funcName };
+                                }
+                                // === STUB END ===
+
+                                // Send tool response back to Gemini
+                                const toolResponse = {
+                                    toolResponse: {
+                                        functionResponses: [{
+                                            id: callId,
+                                            name: funcName,
+                                            response: result
+                                        }]
+                                    }
+                                };
+                                ws.send(JSON.stringify(toolResponse));
+                                const _toolMs = Math.round(performance.now() - _toolT0);
+                                addConnectionLog('TOOL: ' + funcName + ' → ' + result.status + ' (' + _toolMs + 'ms, response sent to Gemini)', 'ok');
+
+                                // Report tool call to server for Cloud Logging
+                                fetch(BASE + '/api/tool-event', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        function_name: funcName,
+                                        arguments: funcArgs,
+                                        result_status: result.status || 'unknown',
+                                        latency_ms: _toolMs,
+                                        call_id: callId
+                                    }),
+                                    keepalive: true
+                                }).catch(() => {});
+                            }
                         }
 
-                        // Handle regular text messages (existing behavior)
-                        if (data.text && !data.type) {
-                            addMsg('fuse', data.text);
-                            checkForMermaid(data.text);
+                        // Handle tool call cancellation
+                        if (msg.toolCallCancellation) {
+                            addConnectionLog('TOOL: Call cancelled by Gemini', 'info');
                         }
+
+                        // Handle session resumption update
+                        if (msg.sessionResumptionUpdate) {
+                            addConnectionLog('Session resumption handle updated', 'info');
+                        }
+
+                        // Handle goAway — Gemini session ending
+                        if (msg.goAway) {
+                            addConnectionLog('Gemini GoAway received. Session will end soon.', 'error');
+                            addMsg('system', 'Gemini session ending. Please start a new session.');
+                        }
+
                     } catch (e) {
-                        addMsg('fuse', event.data);
+                        console.error('Error parsing Gemini message:', e, event.data);
                     }
-                } else if (event.data instanceof ArrayBuffer) {
-                    // Binary audio response from Gemini - play it back
-                    playAudioResponse(event.data);
-
-                    // Latency instrumentation (issue #25)
-                    latencyAudioResponseCount++;
-                    if (latencyExchangeOpen && latencyLastMicSendTs > 0) {
-                        const rtt = Math.round(performance.now() - latencyLastMicSendTs);
-                        latencyClientSamples.push(rtt);
-                        if (latencyClientSamples.length > 50) latencyClientSamples.shift();
-                        latencyExchangeOpen = false;
-                        // Log first 3 exchanges, then every 10th
-                        if (latencyAudioResponseCount <= 3 || latencyAudioResponseCount % 10 === 0) {
-                            const avg = Math.round(latencyClientSamples.reduce((a,b) => a+b, 0) / latencyClientSamples.length);
-                            addConnectionLog('LATENCY #' + latencyAudioResponseCount + ': browser→server→gemini→browser ' + rtt + 'ms (avg ' + avg + 'ms, n=' + latencyClientSamples.length + ')', 'info');
-                        }
-                    }
-
-                    // Diagnostic: any audio from Gemini = audio output works.
-                    // Mic input is confirmed separately via input transcription.
-                    if (sessionState === 'diagnostics') {
-                        if (!diagChecks.audioOutput) {
-                            diagChecks.audioOutput = true;
-                            addConnectionLog('DIAG: Audio output PASS — receiving audio from Gemini', 'ok');
-                            addMsg('system', 'Diagnostic: Audio output working. FUSE is responding.');
-                            checkDiagComplete();
-                        }
-                    }
-                }
-            };
-
-            ws.onclose = (event) => {
-                const wasActive = sessionState === 'active' || sessionState === 'diagnostics' || sessionState === 'ending';
-
-                // Log close code and reason for diagnostics
-                const reason = event.reason || 'No reason provided';
-                const codeMap = {
-                    1000: 'Normal closure',
-                    1001: 'Going away',
-                    1006: 'Abnormal closure (no close frame)',
-                    1008: 'Policy violation',
-                    1011: 'Server error',
-                    1012: 'Service restart',
-                    1013: 'Try again later',
-                    1014: 'Bad gateway',
                 };
-                const codeDesc = codeMap[event.code] || ('Code ' + event.code);
-                addConnectionLog('WebSocket closed: ' + codeDesc + ' — ' + reason, event.code === 1000 ? 'ok' : 'error');
-                addMsg('system', 'Disconnected: ' + codeDesc);
 
-                // Full cleanup via shared function (#17)
-                ws = null;
-                setStatus(false);
-                clearSessionTimer();
-                if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
-                document.getElementById('btnConnect').textContent = 'Start Session';
-                document.getElementById('btnConnect').style.background = '';
-                document.getElementById('btnConnect').style.borderColor = '';
-                document.getElementById('btnConnect').disabled = false;
-                // Stop mic and camera
-                if (micActive) toggleMic();
-                if (cameraStream) toggleCamera();
-                // Show post-session overlay if session was active (not a failed connect)
-                if (wasActive) {
-                    sessionState = 'ended';
-                    showSessionOverlay();
-                } else {
-                    sessionState = 'idle';
-                }
-            };
+                ws.onclose = (event) => {
+                    const wasActive = sessionState === 'active' || sessionState === 'diagnostics' || sessionState === 'ending';
 
-            ws.onerror = (e) => {
-                addConnectionLog('WebSocket error (check browser console for details)', 'error');
-                addMsg('system', 'WebSocket connection error. See System Status for details.');
-            };
+                    const reason = event.reason || 'No reason provided';
+                    const codeMap = {
+                        1000: 'Normal closure',
+                        1001: 'Going away',
+                        1006: 'Abnormal closure (no close frame)',
+                        1008: 'Policy violation',
+                        1011: 'Server error',
+                    };
+                    const codeDesc = codeMap[event.code] || ('Code ' + event.code);
+                    addConnectionLog('Gemini WebSocket closed: ' + codeDesc + ' — ' + reason, event.code === 1000 ? 'ok' : 'error');
+                    addMsg('system', 'Disconnected: ' + codeDesc);
+
+                    // Report session disconnect to server for Cloud Logging
+                    const duration = _sessionStartTime > 0
+                        ? Math.round((Date.now() - _sessionStartTime) / 1000) : 0;
+                    reportSessionEvent('session_disconnect', {
+                        detail: codeDesc + ' — ' + reason,
+                        duration_seconds: duration,
+                        audio_chunks_sent: window._audioSendCount || 0,
+                        audio_chunks_received: latencyAudioResponseCount || 0,
+                        latency_avg_ms: latencyClientSamples.length > 0
+                            ? Math.round(latencyClientSamples.reduce((a,b) => a+b, 0) / latencyClientSamples.length)
+                            : 0
+                    });
+
+                    ws = null;
+                    setStatus(false);
+                    clearSessionTimer();
+                    if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
+                    if (videoFrameInterval) { clearInterval(videoFrameInterval); videoFrameInterval = null; }
+                    document.getElementById('btnConnect').textContent = 'Start Session';
+                    document.getElementById('btnConnect').style.background = '';
+                    document.getElementById('btnConnect').style.borderColor = '';
+                    document.getElementById('btnConnect').disabled = false;
+                    if (micActive) toggleMic();
+                    if (cameraStream) toggleCamera();
+                    if (wasActive) {
+                        sessionState = 'ended';
+                        showSessionOverlay();
+                    } else {
+                        sessionState = 'idle';
+                    }
+                };
+
+                ws.onerror = (e) => {
+                    addConnectionLog('Gemini WebSocket error (check browser console)', 'error');
+                    addMsg('system', 'WebSocket connection error. Check browser console.');
+                    reportSessionEvent('session_error', { detail: 'WebSocket error event' });
+                };
+
+            } catch (e) {
+                addMsg('system', 'Connection failed: ' + e.message);
+                addConnectionLog('Connection failed: ' + e.message, 'error');
+            }
         }
 
         function setStatus(connected) {
@@ -1312,7 +1565,34 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         const s = Math.max(-1, Math.min(1, float32[i]));
                         pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                     }
-                    ws.send(pcm16.buffer);
+                    // Encode as base64 for Gemini JSON protocol (ephemeral token path)
+                    // Use chunked approach to avoid stack overflow on large arrays
+                    const uint8 = new Uint8Array(pcm16.buffer);
+                    const chunkSize = 8192;
+                    let binary = '';
+                    for (let offset = 0; offset < uint8.length; offset += chunkSize) {
+                        const slice = uint8.subarray(offset, Math.min(offset + chunkSize, uint8.length));
+                        binary += String.fromCharCode.apply(null, slice);
+                    }
+                    const b64 = btoa(binary);
+
+                    // Send as Gemini realtimeInput message
+                    ws.send(JSON.stringify({
+                        realtimeInput: {
+                            audio: {
+                                data: b64,
+                                mimeType: 'audio/pcm;rate=16000'
+                            }
+                        }
+                    }));
+
+                    // Debug: log first few audio sends
+                    if (!window._audioSendCount) window._audioSendCount = 0;
+                    window._audioSendCount++;
+                    if (window._audioSendCount <= 3 || window._audioSendCount % 100 === 0) {
+                        addConnectionLog('MIC: audio chunk #' + window._audioSendCount + ' sent (' + uint8.length + ' bytes, b64=' + b64.length + ' chars)', 'info');
+                    }
+
                     // Latency instrumentation (issue #25)
                     latencyLastMicSendTs = performance.now();
                     if (!latencyExchangeOpen) latencyExchangeOpen = true;
@@ -1457,13 +1737,21 @@ Powered by Gemini 3.1 Pro Preview.</div>
             canvas.toBlob((blob) => {
                 if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
                 blob.arrayBuffer().then(buf => {
-                    // Prefix with 'V' (0x56) to distinguish from audio PCM
-                    const prefix = new Uint8Array([0x56]);
-                    const frame = new Uint8Array(buf);
-                    const combined = new Uint8Array(prefix.length + frame.length);
-                    combined.set(prefix);
-                    combined.set(frame, prefix.length);
-                    ws.send(combined.buffer);
+                    // Encode as base64 for Gemini JSON protocol (direct connection)
+                    const uint8 = new Uint8Array(buf);
+                    let binary = '';
+                    for (let i = 0; i < uint8.length; i++) {
+                        binary += String.fromCharCode(uint8[i]);
+                    }
+                    const b64 = btoa(binary);
+                    ws.send(JSON.stringify({
+                        realtimeInput: {
+                            video: {
+                                data: b64,
+                                mimeType: 'image/jpeg'
+                            }
+                        }
+                    }));
                 });
             }, 'image/jpeg', 0.7);
         }
@@ -1539,9 +1827,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
             addMsg('user', text);
 
-            // If WebSocket is open, send through live session
+            // If WebSocket is open, send as Gemini realtimeInput text
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ text: text }));
+                ws.send(JSON.stringify({
+                    realtimeInput: { text: text }
+                }));
                 return;
             }
 
@@ -1614,6 +1904,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
             if (text.includes('graph ') || text.includes('flowchart ') || text.includes('sequenceDiagram')) {
                 renderMermaid(text);
                 addConnectionLog('WORKFLOW: Architecture diagram updated (' + text.length + ' chars)', 'ok');
+                updateWorkflowStatus('Starting Design of Architectural Diagram...', '#d29922');
                 // Debounce auto-workflow: wait 5s after last diagram update before triggering
                 if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
                 autoWorkflowDebounce = setTimeout(() => {
@@ -1900,24 +2191,47 @@ Powered by Gemini 3.1 Pro Preview.</div>
             }
         }
 
-        // --- Auto-workflow: triggered after diagram update ---
+        // --- Auto-workflow: triggered after diagram update (issue #31: status display) ---
         let autoWorkflowRunning = false;
+
+        function updateWorkflowStatus(text, color) {
+            const el = document.getElementById('workflowStatus');
+            if (el) {
+                el.textContent = text;
+                el.style.color = color || '#8b949e';
+            }
+        }
+
         async function runAutoWorkflow() {
             if (autoWorkflowRunning) return;
             autoWorkflowRunning = true;
             addConnectionLog('WORKFLOW: Auto-workflow started (validate → visualize → animate)', 'info');
             try {
-                // Step 1: Validate
-                addConnectionLog('WORKFLOW: Validating architecture...', 'info');
+                // Step 1: Diagram detected
+                updateWorkflowStatus('Finished Design of Architectural Diagram', '#3fb950');
+
+                // Step 2: Validate
+                updateWorkflowStatus('Starting Validation...', '#d29922');
                 await runValidation();
-                // Step 2: Visualize
+                updateWorkflowStatus('Finished Validation', '#3fb950');
+
+                // Step 3: Visualize
+                updateWorkflowStatus('Starting Image Generation for Visualization...', '#d29922');
                 const imgOk = await generateRealistic();
-                // Step 3: Animate (only if image succeeded)
                 if (imgOk) {
+                    updateWorkflowStatus('Finished Image Generation for Visualization', '#3fb950');
+
+                    // Step 4: Animate
+                    updateWorkflowStatus('Starting Animation of Image...', '#d29922');
                     await generateAnimation();
+                    updateWorkflowStatus('Finished Animation of Image', '#3fb950');
+                } else {
+                    updateWorkflowStatus('Image generation failed — skipping animation', '#f85149');
                 }
+
                 addConnectionLog('WORKFLOW: Auto-workflow complete', 'ok');
             } catch (e) {
+                updateWorkflowStatus('Workflow error: ' + e.message, '#f85149');
                 addConnectionLog('WORKFLOW: Auto-workflow error — ' + e.message, 'error');
             } finally {
                 autoWorkflowRunning = false;
@@ -2019,7 +2333,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
         function renderComponentHealth(components) {
             const el = document.getElementById('componentHealth');
             const names = {
-                redis: 'Redis', gemini_live: 'Gemini Live', gemini_vision: 'Gemini Vision',
+                redis: 'Redis', gemini_live: 'Gemini Live (using Ephemeral Tokens)', gemini_vision: 'Gemini Vision',
                 gemini_pro: 'Gemini Pro', diagram_renderer: 'Diagram Renderer',
                 imagen: 'Imagen 4.0', veo3: 'Veo 3.0'
             };
@@ -2033,6 +2347,18 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 html += '<div><span class="health-dot ' + (ok ? 'ok' : 'error') + '"></span>' + label + detail + '</div>';
             }
             el.innerHTML = html || 'No components reported.';
+
+            // Enable Start Session button now that components are loaded and visible
+            // In production, check all_ok; locally, Redis will be red but others green
+            if (html) {
+                const connectBtn = document.getElementById('btnConnect');
+                if (connectBtn.disabled && (sessionState === 'idle' || sessionState === 'ended')) {
+                    connectBtn.disabled = false;
+                    connectBtn.style.opacity = '';
+                    connectBtn.style.cursor = '';
+                    connectBtn.textContent = 'Start Session';
+                }
+            }
         }
 
         function renderSessionInfo(session) {
@@ -2173,6 +2499,24 @@ Powered by Gemini 3.1 Pro Preview.</div>
             // Transition to active session
             sessionState = 'active';
             addConnectionLog('Session active', 'ok');
+            reportSessionEvent('session_active', {
+                detail: reason === 'passed' ? 'All diagnostics passed' : 'Diagnostics timed out'
+            });
+
+            // Trigger Gemini to speak first after 10s delay
+            // Sends a silent text prompt via realtimeInput — user won't hear this,
+            // but Gemini responds with audio, creating illusion it spoke first.
+            // Workaround for googleapis/python-genai#1533 (proactiveAudio unreliable)
+            setTimeout(() => {
+                if (ws && ws.readyState === WebSocket.OPEN && sessionState === 'active') {
+                    ws.send(JSON.stringify({
+                        realtimeInput: {
+                            text: 'Hello, please greet me and let me know you are ready.'
+                        }
+                    }));
+                    addConnectionLog('Greeting trigger sent (10s delay)', 'info');
+                }
+            }, 10000);
 
             // Start video streaming to Live API at 1 FPS (issue #22)
             if (cameraStream && ws && ws.readyState === WebSocket.OPEN) {

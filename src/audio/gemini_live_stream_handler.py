@@ -1,3 +1,6 @@
+# Copyright (c) 2026 ITH LLC. All rights reserved.
+# Licensed under AGPL-3.0. See LICENSE file for details.
+
 import os
 import asyncio
 from typing import Optional, List, Dict
@@ -112,10 +115,9 @@ class GeminiLiveStreamHandler:
             location=live_location,
             http_options={"api_version": "v1beta1"}
         )
-        # Vertex AI Live API model — preview for latency testing (issue #27)
-        # GA: "gemini-live-2.5-flash-native-audio"
-        # Preview (deprecates March 19, 2026): "gemini-live-2.5-flash-preview-native-audio-09-2025"
-        self.model_id = "gemini-live-2.5-flash-preview-native-audio-09-2025"
+        # Vertex AI Live API model — GA model (hackathon-compatible)
+        # Preview tested in issue #27: 53s+ latency, worse than GA. Reverting.
+        self.model_id = "gemini-live-2.5-flash-native-audio"
 
     def get_config(self, resumption_handle: str = None) -> types.LiveConnectConfig:
         """Returns the configuration for the Gemini Live session.
@@ -124,57 +126,80 @@ class GeminiLiveStreamHandler:
             resumption_handle: Optional handle from a previous session for seamless
                 reconnection. Pass None for the first connection.
         """
+        # Issue #29 fix: minimal config + session_resumption + compression + VAD.
+        # - transparent=True: Vertex AI feature for seamless reconnection indexing
+        #   (confirmed: cloud.google.com/vertex-ai/generative-ai/docs/live-api/start-manage-session)
+        # - RealtimeInputConfig: server-side VAD prevents 1007 from audio arriving
+        #   during session transitions (replaces 0.5s sleep hacks in main.py)
+        #   (confirmed: ai.google.dev/gemini-api/docs/live-guide)
+        # - context_window_compression: audio at ~25 tok/s exhausts 128k in ~85 min
+        #   (confirmed: ai.google.dev/gemini-api/docs/live-api/best-practices)
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
-            proactivity=types.ProactivityConfig(proactive_audio=True),
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
-            # Session resumption: survives Gemini server-side connection resets.
-            # Tokens are valid for 2 hours (Vertex AI) after last session end.
-            session_resumption=types.SessionResumptionConfig(
-                handle=resumption_handle
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Puck"
+                    )
+                )
             ),
-            # Context window compression: prevents 128k token exhaustion.
-            # Without this, audio-only sessions are limited to ~15 minutes.
+            # Session resumption: survives Gemini server-side connection resets.
+            # transparent=True returns client message index for seamless resend.
+            session_resumption=types.SessionResumptionConfig(
+                handle=resumption_handle,
+                transparent=True,
+            ),
+            # Context window compression: prevents token exhaustion.
             context_window_compression=types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow(),
             ),
-            # Disable thinking to reduce audio latency (issue #26)
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-            # Function calling tools for on-demand vision capture (issue #19)
+            # Server-side VAD: Gemini manages speech boundaries, preventing
+            # 1007 errors from audio frames hitting during turn transitions.
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_LOW,
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                )
+            ),
+        )
+
+    def get_full_config(self, resumption_handle: str = None) -> types.LiveConnectConfig:
+        """Full FUSE config with all features. Disabled until minimal config passes.
+
+        Re-enable by swapping get_config() back to this implementation.
+        """
+        return types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Puck"
+                    )
+                )
+            ),
+            proactivity=types.ProactivityConfig(proactive_audio=True),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            session_resumption=types.SessionResumptionConfig(
+                handle=resumption_handle
+            ),
+            context_window_compression=types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow(),
+            ),
             tools=LIVE_TOOLS,
             system_instruction=types.Content(
                 parts=[
                     types.Part.from_text(
                         text=(
-                            "You are FUSE, the Collaborative Brainstorming Intelligence. "
-                            "You are an expert system architect and facilitator. "
+                            "You are FUSE, an expert system architect and brainstorming facilitator. "
                             "You help users design complex systems using voice and vision. "
-                            "IMPORTANT: When the session begins, immediately greet the user by saying: "
-                            "'Hello! I am FUSE, your brainstorming assistant. "
-                            "Let me run a quick check. Please say a few words to test your microphone.' "
-                            "Do not wait for the user to speak first — start talking right away. "
-                            "When you hear the user speak, respond with: "
-                            "'I can hear you clearly. Let us begin your brainstorming session.' "
-                            "After this initial greeting and mic check, proceed normally. "
+                            "Keep your responses concise. "
+                            "When the session begins, greet the user and ask them to say a few words "
+                            "to test their microphone. "
                             "\n\n"
-                            "ON-DEMAND VISION: You have the capture_and_analyze_frame function "
-                            "to see what the user's camera is showing. Call it when the user asks "
-                            "you to 'look at this', 'capture that', 'what do you see', or any "
-                            "reference to something visual. It triggers the full vision pipeline "
-                            "to extract a Mermaid diagram from the camera frame. You should call "
-                            "this function proactively when the user mentions physical objects, "
-                            "whiteboards, or spatial arrangements. "
-                            "\n\n"
-                            "PROXY OBJECTS: When a user assigns a role to a physical object "
-                            "(e.g., 'This stapler is a GPU'), call set_proxy_object to register it. "
-                            "You can also call get_session_context to recall all current assignments "
-                            "and the architecture diagram state. "
-                            "\n\n"
-                            "When you detect a logical architecture violation or the user asks for "
-                            "a validation check, let them know. "
-                            "When a user requests a mode switch (e.g., 'switch to whiteboard mode'), "
-                            "acknowledge the switch."
+                            "TOOLS: Use capture_and_analyze_frame when the user references something "
+                            "visual. Use set_proxy_object when a user assigns a role to a physical "
+                            "object. Use get_session_context to recall current state."
                         )
                     )
                 ]

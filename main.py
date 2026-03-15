@@ -1,3 +1,6 @@
+# Copyright (c) 2026 ITH LLC. All rights reserved.
+# Licensed under AGPL-3.0. See LICENSE file for details.
+
 import asyncio
 import base64
 import logging
@@ -12,6 +15,9 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+# Preload google.auth.transport.requests to avoid lazy-loading AttributeError
+# in google-genai SDK (namespace package issue)
+import google.auth.transport.requests  # noqa: F401
 
 # Configure logging to stderr so Cloud Run captures it
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -89,11 +95,11 @@ async def health_check():
     """Deep health check — verifies all downstream components."""
     components = {}
 
-    # 1. Redis
+    # 1. Redis — run blocking ping in a thread to avoid stalling the event loop
     try:
         if state_manager:
             t0 = time.time()
-            state_manager.r.ping()
+            await asyncio.wait_for(asyncio.to_thread(state_manager.r.ping), timeout=3)
             latency_ms = int((time.time() - t0) * 1000)
             components["redis"] = {"status": "ok", "latency_ms": latency_ms}
         else:
@@ -172,12 +178,43 @@ async def receive_frame(request: Request, mode: Optional[str] = None):
 
     # Apply mode override if provided
     if mode and mode in ("whiteboard", "imagine", "charades") and state_manager:
-        state_manager.set_vision_mode(mode)
+        try:
+            state_manager.set_vision_mode(mode)
+        except Exception:
+            pass  # Redis down
 
+    _frame_size = len(frame_bytes)
+    _frame_t0 = time.time()
     _processing_frame = True
     try:
-        mermaid_code = vision_capture.process_received_frame(frame_bytes)
+        # Run in thread to avoid blocking event loop on Redis timeouts (issue #30)
+        mermaid_code = await asyncio.wait_for(
+            asyncio.to_thread(vision_capture.process_received_frame, frame_bytes),
+            timeout=10
+        )
+        _frame_ms = int((time.time() - _frame_t0) * 1000)
+        logger.info(
+            f"EVENT=vision_frame_processed | outcome=success"
+            f" | duration_ms={_frame_ms} | frame_size={_frame_size}"
+            f" | mermaid_length={len(mermaid_code)}"
+        )
         return {"status": "success", "mermaid_length": len(mermaid_code)}
+    except asyncio.TimeoutError:
+        _frame_ms = int((time.time() - _frame_t0) * 1000)
+        logger.warning(
+            f"EVENT=vision_frame_processed | outcome=timeout"
+            f" | duration_ms={_frame_ms} | frame_size={_frame_size}"
+        )
+        return {"status": "error", "message": "Vision processing timed out"}
+    except Exception as e:
+        _frame_ms = int((time.time() - _frame_t0) * 1000)
+        error_detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        logger.warning(
+            f"EVENT=vision_frame_processed | outcome=error"
+            f" | duration_ms={_frame_ms} | frame_size={_frame_size}"
+            f" | error={error_detail}"
+        )
+        return {"status": "error", "message": error_detail}
     finally:
         _processing_frame = False
 
@@ -186,7 +223,10 @@ async def get_vision_mode():
     """Returns the current vision processing mode."""
     if not state_manager:
         return {"status": "error", "message": "State manager not initialized."}
-    return {"status": "ok", "mode": state_manager.get_vision_mode()}
+    try:
+        return {"status": "ok", "mode": state_manager.get_vision_mode()}
+    except Exception as e:
+        return {"status": "ok", "mode": "auto", "redis_error": str(e)}
 
 @app.post("/vision/mode")
 async def set_vision_mode(request: Request):
@@ -197,7 +237,10 @@ async def set_vision_mode(request: Request):
     mode = body.get("mode", "auto")
     if mode not in ("auto", "whiteboard", "imagine", "charades"):
         return {"status": "error", "message": f"Invalid mode: {mode}"}
-    state_manager.set_vision_mode(mode)
+    try:
+        state_manager.set_vision_mode(mode)
+    except Exception:
+        pass  # Redis down — mode won't persist but won't crash
     return {"status": "ok", "mode": mode}
 
 @app.websocket("/live")
@@ -252,6 +295,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     model=live_handler.model_id,
                     config=config
                 ) as session:
+                    _session_start_ts = time.time()
                     if first_connect:
                         logger.info("Gemini Live session connected successfully.")
                         await websocket.send_text(json.dumps({
@@ -269,11 +313,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         first_connect = False
                     else:
                         logger.info(f"Gemini Live session reconnected (attempt {reconnect_count}, handle={'yes' if resumption_handle else 'no'}).")
-                        await websocket.send_text(json.dumps({
-                            "type": "status",
-                            "stage": "reconnected",
-                            "message": "Audio session reconnected."
-                        }))
+                        try:
+                            await websocket.send_text(json.dumps({
+                                "type": "status",
+                                "stage": "reconnected",
+                                "message": "Audio session reconnected."
+                            }))
+                        except Exception:
+                            logger.info("Client gone during reconnect — stopping.")
+                            client_connected = False
+                            break
 
                     # Shared flag so tasks can signal each other to stop
                     session_active = True
@@ -485,11 +534,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     _last_audio_to_gemini_ts = 0.0  # when server last sent audio to Gemini
                     _audio_exchange_count = 0
 
+                    # Tool-call audio gate: pause send_realtime_input while Gemini
+                    # awaits a tool response. Streaming audio during pending tool
+                    # calls triggers 1008/1011 disconnects (race condition).
+                    # See: discuss.ai.google.dev/t/116509
+                    _tool_call_pending = False
+
                     async def receive_from_client():
                         nonlocal session_active, client_connected
-                        nonlocal _last_audio_recv_ts, _last_audio_to_gemini_ts
+                        nonlocal _last_audio_recv_ts, _last_audio_to_gemini_ts, _tool_call_pending
                         global _latest_frame
                         try:
+                            # Brief pause to let Gemini session fully initialize
+                            # before forwarding client audio. Prevents buffered
+                            # data from the handshake gap causing 1007 errors.
+                            await asyncio.sleep(0.5)
+                            logger.info("receive_from_client: ready to forward audio")
+                            _audio_frames_sent = 0
                             while session_active:
                                 message = await websocket.receive()
                                 if "bytes" in message:
@@ -498,8 +559,18 @@ async def websocket_endpoint(websocket: WebSocket):
                                     if len(raw) > 1 and raw[0:1] == b'V':
                                         # Video frame — update latest frame buffer
                                         _latest_frame = raw[1:]
-                                    else:
-                                        # Audio frame — send to Gemini Live API
+                                        if not hasattr(receive_from_client, '_vlog'):
+                                            receive_from_client._vlog = True
+                                            logger.info(f"First video frame via WS: {len(raw)} bytes")
+                                    elif len(raw) >= 2 and len(raw) % 2 == 0:
+                                        # Audio frame — must be valid PCM16 (even byte count)
+                                        # Gate: skip sending audio while tool call is pending
+                                        # to avoid 1008/1011 race condition (discuss.ai.google.dev/t/116509)
+                                        if _tool_call_pending:
+                                            continue
+                                        _audio_frames_sent += 1
+                                        if _audio_frames_sent <= 3:
+                                            logger.info(f"Audio frame #{_audio_frames_sent}: {len(raw)} bytes, first4={raw[:4].hex()}")
                                         _last_audio_recv_ts = time.time()  # issue #25
                                         audio_blob = genai_types.Blob(
                                             data=raw,
@@ -507,6 +578,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                         )
                                         await session.send_realtime_input(audio=audio_blob)
                                         _last_audio_to_gemini_ts = time.time()  # issue #25
+                                    else:
+                                        # Odd byte count or empty — skip (not valid PCM16)
+                                        logger.warning(f"Skipping invalid binary frame: {len(raw)} bytes")
                                 elif "text" in message:
                                     raw = message["text"]
                                     try:
@@ -526,7 +600,10 @@ async def websocket_endpoint(websocket: WebSocket):
                                     except (json.JSONDecodeError, TypeError):
                                         text_val = raw
                                     if state_manager:
-                                        state_manager.log_event("voice_input", {"text": text_val})
+                                        try:
+                                            state_manager.log_event("voice_input", {"text": text_val})
+                                        except Exception:
+                                            pass
                                     # Use send_realtime_input for text (issue #18)
                                     # Deprecated session.send() causes sessions to go
                                     # unresponsive after first turn_complete (python-genai #1224)
@@ -542,12 +619,25 @@ async def websocket_endpoint(websocket: WebSocket):
                             session_active = False
 
                     async def send_to_client():
-                        nonlocal session_active, needs_reconnect, resumption_handle
+                        nonlocal session_active, needs_reconnect, resumption_handle, _tool_call_pending
                         nonlocal _last_audio_recv_ts, _last_audio_to_gemini_ts, _audio_exchange_count
+                        nonlocal _session_start_ts
                         try:
+                          _resp_count = 0
+                          while session_active:
                             async for response in session.receive():
+                              try:
                                 if response is None:
                                     break
+
+                                _resp_count += 1
+                                # Log first few responses with actual field values (issue #29)
+                                if _resp_count <= 5:
+                                    has_audio = bool(getattr(response, 'server_content', None))
+                                    has_resumption = bool(getattr(response, 'session_resumption_update', None))
+                                    has_goaway = bool(getattr(response, 'go_away', None))
+                                    has_data = bool(getattr(response, 'data', None))
+                                    logger.info(f"Gemini resp #{_resp_count}: server_content={has_audio} resumption={has_resumption} goaway={has_goaway} data={has_data}")
 
                                 # Capture session resumption handle (issue #18)
                                 if hasattr(response, 'session_resumption_update') and response.session_resumption_update:
@@ -561,12 +651,16 @@ async def websocket_endpoint(websocket: WebSocket):
                                     time_left = getattr(response.go_away, 'time_left', 'unknown')
                                     logger.warning(f"Gemini GoAway received, time_left={time_left}. Will reconnect.")
                                     if state_manager:
-                                        state_manager.log_event("gemini_goaway", {"time_left": str(time_left)})
+                                        try:
+                                            state_manager.log_event("gemini_goaway", {"time_left": str(time_left)})
+                                        except Exception:
+                                            pass
                                     needs_reconnect = True
                                     break
 
                                 # Handle function calls from Gemini (issue #19)
                                 if hasattr(response, 'tool_call') and response.tool_call:
+                                    _tool_call_pending = True  # gate audio input
                                     function_responses = []
                                     for fc in response.tool_call.function_calls:
                                         result = await _execute_tool_call(fc)
@@ -581,6 +675,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                     await session.send_tool_response(
                                         function_responses=function_responses
                                     )
+                                    _tool_call_pending = False  # ungate audio input
                                     continue
 
                                 if hasattr(response, 'server_content') and response.server_content:
@@ -597,8 +692,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                                 "finished": getattr(t, 'finished', False)
                                             }))
                                             if state_manager and getattr(t, 'finished', False):
-                                                state_manager.log_event("voice_input", {"text": t.text})
-                                                await _check_voice_commands(t.text)
+                                                try:
+                                                    state_manager.log_event("voice_input", {"text": t.text})
+                                                    await _check_voice_commands(t.text)
+                                                except Exception:
+                                                    pass  # Redis down — don't crash audio pipeline
 
                                     # Output transcription (what Gemini said)
                                     if hasattr(sc, 'output_transcription') and sc.output_transcription:
@@ -611,14 +709,20 @@ async def websocket_endpoint(websocket: WebSocket):
                                                 "finished": getattr(t, 'finished', False)
                                             }))
                                             if state_manager and getattr(t, 'finished', False):
-                                                state_manager.log_event("gemini_output", {"text": t.text})
+                                                try:
+                                                    state_manager.log_event("gemini_output", {"text": t.text})
+                                                except Exception:
+                                                    pass  # Redis down — don't crash audio pipeline
 
                                     if hasattr(sc, 'model_turn') and sc.model_turn and sc.model_turn.parts:
                                         for part in sc.model_turn.parts:
                                             if hasattr(part, 'text') and part.text:
                                                 await websocket.send_text(json.dumps({"text": part.text}))
                                                 if state_manager:
-                                                    state_manager.log_event("gemini_output", {"text": part.text})
+                                                    try:
+                                                        state_manager.log_event("gemini_output", {"text": part.text})
+                                                    except Exception:
+                                                        pass
                                             if hasattr(part, 'inline_data') and part.inline_data:
                                                 # Latency instrumentation (issue #25)
                                                 t_gemini_resp = time.time()
@@ -643,49 +747,49 @@ async def websocket_endpoint(websocket: WebSocket):
                                                             }))
                                                         except Exception:
                                                             pass
-                                if hasattr(response, 'text') and response.text:
-                                    await websocket.send_text(json.dumps({"text": response.text}))
-                                if hasattr(response, 'data') and response.data:
-                                    # Latency instrumentation (issue #25)
-                                    t_gemini_resp = time.time()
-                                    await websocket.send_bytes(response.data)
-                                    t_sent = time.time()
-                                    if _last_audio_recv_ts > 0:
-                                        _audio_exchange_count += 1
-                                        latency = {
-                                            "server_recv_to_gemini": round((_last_audio_to_gemini_ts - _last_audio_recv_ts) * 1000),
-                                            "gemini_processing": round((t_gemini_resp - _last_audio_to_gemini_ts) * 1000),
-                                            "server_to_client": round((t_sent - t_gemini_resp) * 1000),
-                                            "total_server": round((t_sent - _last_audio_recv_ts) * 1000),
-                                        }
-                                        if _audio_exchange_count % 10 == 1 or _audio_exchange_count <= 3:
-                                            try:
-                                                await websocket.send_text(json.dumps({
-                                                    "type": "latency",
-                                                    "hop": "server",
-                                                    "n": _audio_exchange_count,
-                                                    **latency,
-                                                }))
-                                            except Exception:
-                                                pass
+                                # NOTE: response.text and response.data are NOT checked here.
+                                # Audio arrives via server_content.model_turn.parts[].inline_data
+                                # (handled above). Checking response.data too caused doubled audio.
+                              except Exception as inner_e:
+                                  # Redis errors: swallow. Everything else: re-raise.
+                                  if "Connection refused" in str(inner_e) or "redis" in type(inner_e).__module__:
+                                      pass  # Redis down — don't kill audio pipeline
+                                  else:
+                                      raise inner_e
+                            # Generator exhausted = turn complete, NOT session death.
+                            # Google's demo loops back and calls session.receive() again
+                            # on the SAME session (issue #29, attempt 12 fix).
+                            _session_dur = round(time.time() - _session_start_ts, 1)
+                            logger.info(f"Gemini receive() generator exhausted after {_session_dur}s — re-entering receive loop (same session)")
+                            # Brief pause before re-entering — let session state settle
+                            # to avoid 1007 from audio arriving during transition
+                            await asyncio.sleep(0.5)
+                            _session_start_ts = time.time()  # reset timer for next segment
                         except Exception as e:
                             error_str = str(e)
                             if "1000" in error_str:
                                 logger.info("Gemini Live session ended normally (code 1000). Will reconnect.")
                                 needs_reconnect = True
+                            elif "keepalive" in error_str.lower() or "ping" in error_str.lower():
+                                logger.warning(f"WebSocket keepalive timeout in send_to_client: {e}")
+                                client_connected = False
                             else:
-                                logger.error(f"Error in send_to_client: {e}\n{traceback.format_exc()}")
+                                logger.error(f"Error in send_to_client: {e}")
                                 needs_reconnect = True
                         finally:
                             session_active = False
 
-                    # Run all four tasks; when send or receive finishes, cancel the others
+                    # Run core tasks; video_sender only starts if toggled on (issue #27)
+                    # Google reference demos run 2-3 tasks max. Keeping it lean.
                     tasks = [
                         asyncio.create_task(receive_from_client()),
                         asyncio.create_task(send_to_client()),
                         asyncio.create_task(keepalive_ping()),
-                        asyncio.create_task(video_sender()),
                     ]
+                    # Video sender is opt-in — continuous video causes 53s+ latency
+                    # on Gemini (issue #27). On-demand vision via tool calling is preferred.
+                    if _video_to_gemini_enabled:
+                        tasks.append(asyncio.create_task(video_sender()))
 
                     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     for task in pending:
@@ -713,9 +817,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
             except Exception as e:
                 error_msg = f"{type(e).__name__}: {e}"
-                logger.error(f"Gemini connect error (attempt {reconnect_count}): {error_msg}\n{traceback.format_exc()}")
+                if not client_connected:
+                    logger.info(f"Client gone during Gemini connect — stopping.")
+                    break
+                logger.error(f"Gemini connect error (attempt {reconnect_count}): {error_msg}")
                 reconnect_count += 1
-                if reconnect_count >= MAX_RECONNECTS or not client_connected:
+                if reconnect_count >= MAX_RECONNECTS:
                     break
                 await asyncio.sleep(1.0)
 
@@ -868,6 +975,167 @@ async def validate_architecture():
     return {"status": "success", **result}
 
 
+# --- Ephemeral Token Alternate Page (Issue #30) ---
+# Direct browser-to-Gemini audio via short-lived tokens, bypassing the server-side
+# Vertex AI proxy. Eliminates 1007/1008 errors from double-hop audio relay.
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+@app.get("/ephemeral", response_class=HTMLResponse)
+async def serve_ephemeral_ui(request: Request):
+    """Serves the ephemeral token alternate page for direct Gemini Live API access."""
+    html_path = os.path.join(os.path.dirname(__file__), "static", "index_ephemeral_tokens.html")
+    if not os.path.exists(html_path):
+        return HTMLResponse(content="<h1>Ephemeral token page not found</h1>", status_code=404)
+    logger.info(
+        f"EVENT=ephemeral_page_served"
+        f" | client_ip={request.client.host}"
+        f" | user_agent={request.headers.get('user-agent', 'unknown')[:80]}"
+    )
+    with open(html_path, "r") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/api/ephemeral-token")
+async def create_ephemeral_token(request: Request):
+    """Generates a short-lived ephemeral token for direct Gemini Live API access.
+
+    Requires GEMINI_API_KEY environment variable (Gemini Developer API key).
+    Token is valid for 1 session, expires in 30 minutes.
+    """
+    if not GEMINI_API_KEY:
+        return {"status": "error", "message": "GEMINI_API_KEY not configured on server."}
+
+    try:
+        import datetime
+        from google import genai
+
+        client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options={"api_version": "v1alpha"}
+        )
+
+        now = datetime.datetime.now(tz=datetime.timezone.utc)
+
+        token = client.auth_tokens.create(
+            config={
+                "uses": 1,
+                "expire_time": now + datetime.timedelta(minutes=30),
+                "new_session_expire_time": now + datetime.timedelta(minutes=2),
+                "http_options": {"api_version": "v1alpha"},
+            }
+        )
+
+        logger.info(
+            f"EVENT=ephemeral_token_created"
+            f" | token_prefix={token.name[:12]}"
+            f" | expires_in=1800s"
+            f" | client_ip={request.client.host}"
+            f" | user_agent={request.headers.get('user-agent', 'unknown')[:80]}"
+        )
+
+        return {
+            "status": "ok",
+            "token": token.name,
+            "expires_in_seconds": 1800,
+            "model": "gemini-2.5-flash-native-audio-latest",
+        }
+    except Exception as e:
+        logger.error(
+            f"EVENT=ephemeral_token_failed"
+            f" | error={e}"
+            f" | client_ip={request.client.host}"
+        )
+        return {"status": "error", "message": str(e)}
+
+
+# --- Client-Side Session Event Logging (Issue #30, Gap #4) ---
+_VALID_SESSION_EVENTS = {"session_connect", "session_disconnect", "session_error", "session_active"}
+
+@app.post("/api/session-event")
+async def log_session_event(request: Request):
+    """Receives client-side Gemini session lifecycle events for centralized logging.
+
+    The ephemeral token page connects directly to Gemini (no server WebSocket),
+    so session events are only visible client-side. This endpoint bridges them
+    into server logs for Cloud Logging observability.
+    """
+    try:
+        body = await request.body()
+        if len(body) > 1024:
+            return {"status": "error", "message": "Payload too large (max 1KB)"}
+
+        data = json.loads(body)
+        event = data.get("event", "unknown")
+
+        if event not in _VALID_SESSION_EVENTS:
+            return {"status": "error", "message": f"Unknown event: {event}"}
+
+        client_ip = request.client.host
+
+        parts = [f"EVENT=ephemeral_{event}", f"client_ip={client_ip}"]
+        for key in ("detail", "duration_seconds", "audio_chunks_sent",
+                     "audio_chunks_received", "latency_avg_ms"):
+            if key in data and data[key] is not None:
+                parts.append(f"{key}={data[key]}")
+
+        logger.info(" | ".join(parts))
+
+        return {"status": "ok"}
+    except json.JSONDecodeError:
+        return {"status": "error", "message": "Invalid JSON"}
+    except Exception as e:
+        logger.warning(f"EVENT=session_event_error | error={e}")
+        return {"status": "error", "message": str(e)}
+
+
+# --- Tool Call Event Logging (Issue #30) ---
+_VALID_TOOL_FUNCTIONS = {"capture_and_analyze_frame", "get_session_context", "set_proxy_object"}
+
+@app.post("/api/tool-event")
+async def log_tool_event(request: Request):
+    """Receives client-side Gemini tool call telemetry for centralized logging.
+
+    The ephemeral token page handles tool calls in the browser. This endpoint
+    bridges tool call events into server logs for Cloud Logging observability.
+    """
+    try:
+        body = await request.body()
+        if len(body) > 2048:
+            return {"status": "error", "message": "Payload too large (max 2KB)"}
+
+        data = json.loads(body)
+        func_name = data.get("function_name", "")
+
+        if not func_name:
+            return {"status": "error", "message": "Missing function_name"}
+
+        if func_name not in _VALID_TOOL_FUNCTIONS:
+            return {"status": "error", "message": f"Unknown function: {func_name}"}
+
+        client_ip = request.client.host
+        args = json.dumps(data.get("arguments", {}))
+        status = data.get("result_status", "unknown")
+        latency = data.get("latency_ms", 0)
+        call_id = data.get("call_id", "n/a")
+
+        logger.info(
+            f"EVENT=ephemeral_tool_call"
+            f" | function={func_name}"
+            f" | args={args}"
+            f" | status={status}"
+            f" | latency_ms={latency}"
+            f" | call_id={call_id}"
+            f" | client_ip={client_ip}"
+        )
+
+        return {"status": "ok"}
+    except json.JSONDecodeError:
+        return {"status": "error", "message": "Invalid JSON"}
+    except Exception as e:
+        logger.warning(f"EVENT=tool_event_error | error={e}")
+        return {"status": "error", "message": str(e)}
+
+
 async def run_periodic_validation(interval_seconds: int = 60):
     """Periodically validates the architectural state using ProofOrchestrator."""
     while True:
@@ -884,48 +1152,81 @@ async def run_periodic_validation(interval_seconds: int = 60):
                     })
                     print(f"Periodic validation: valid={result['is_valid']}")
         except Exception as e:
-            print(f"Periodic validation error: {e}")
+            # Log Redis timeouts at DEBUG to reduce noise — they self-resolve when Redis is reachable
+            error_str = str(e)
+            if "Timeout" in error_str or "Connection refused" in error_str:
+                logger.debug(f"Periodic validation skipped (Redis unavailable): {e}")
+            else:
+                logger.warning(f"Periodic validation error: {e}")
 
 
 async def start_agents():
     """Initialize all FUSE components. Awaited at startup so Cloud Run readiness
-    probe does not pass until handlers are ready (fixes cold-start issue #23)."""
+    probe does not pass until handlers are ready (fixes cold-start issue #23).
+    Each component initializes independently so one failure doesn't block others."""
     global live_handler, diagram_renderer, state_manager, vision_capture, proof_orchestrator, imagen_visualizer, veo3_animator
-    print(f"--- Initializing FUSE: The Collaborative Brainstorming Intelligence (Project: {PROJECT_ID}) ---")
+    print(f"--- Initializing FUSE: The Collaborative Brainstorming Intelligence (Project: {PROJECT_ID}) ---", flush=True)
 
     # 1. Initialize State Manager (Redis)
-    state_manager = SessionStateManager(host=REDIS_HOST)
-    print(f"  State Manager (Redis) initialized at {REDIS_HOST}.")
+    try:
+        state_manager = SessionStateManager(host=REDIS_HOST)
+        # Verify connectivity with a fast ping (3s timeout set in SessionStateManager)
+        state_manager.r.ping()
+        print(f"  State Manager (Redis) initialized at {REDIS_HOST}.", flush=True)
+    except Exception as e:
+        print(f"  State Manager (Redis) FAILED at {REDIS_HOST}: {e}", flush=True)
+        # Keep state_manager instance — lazy ops will fail gracefully per-call
 
     # 2. Initialize Proof Orchestrator (gemini-3.1-pro-preview)
-    proof_orchestrator = ProofOrchestrator(project_id=PROJECT_ID, location=LOCATION)
-    print("  Proof Orchestrator (gemini-3.1-pro-preview) initialized.")
+    try:
+        proof_orchestrator = ProofOrchestrator(project_id=PROJECT_ID, location=LOCATION)
+        print("  Proof Orchestrator (gemini-3.1-pro-preview) initialized.", flush=True)
+    except Exception as e:
+        print(f"  Proof Orchestrator FAILED: {e}", flush=True)
 
     # 3. Initialize Vision Capture (gemini-3.1-flash-lite-preview) with two-pass pipeline
-    vision_capture = VisionStateCapture(project_id=PROJECT_ID, state_manager=state_manager, location=LOCATION)
-    print("  Vision State Capture (two-pass pipeline, gemini-3.1-flash-lite-preview) initialized.")
+    try:
+        vision_capture = VisionStateCapture(project_id=PROJECT_ID, state_manager=state_manager, location=LOCATION)
+        print("  Vision State Capture (two-pass pipeline, gemini-3.1-flash-lite-preview) initialized.", flush=True)
+    except Exception as e:
+        print(f"  Vision State Capture FAILED: {e}", flush=True)
 
     # 4. Initialize Live Stream Handler (gemini-2.5-flash-native-audio-preview)
-    live_handler = GeminiLiveStreamHandler(project_id=PROJECT_ID, state_manager=state_manager, location=LOCATION)
-    print("  Gemini Live Stream Handler (Live API) initialized.")
+    try:
+        live_handler = GeminiLiveStreamHandler(project_id=PROJECT_ID, state_manager=state_manager, location=LOCATION)
+        print("  Gemini Live Stream Handler (Live API) initialized.", flush=True)
+    except Exception as e:
+        print(f"  Gemini Live Stream Handler FAILED: {e}", flush=True)
 
     # 5. Initialize Diagram Renderer (Mermaid CLI)
-    diagram_renderer = DiagramRenderer()
-    print("  Diagram Renderer (Mermaid CLI) initialized.")
+    try:
+        diagram_renderer = DiagramRenderer()
+        print("  Diagram Renderer (Mermaid CLI) initialized.", flush=True)
+    except Exception as e:
+        print(f"  Diagram Renderer FAILED: {e}", flush=True)
 
     # 6. Initialize Imagen Diagram Visualizer (imagen-4.0-generate-001)
-    imagen_visualizer = ImagenDiagramVisualizer(
-        project_id=PROJECT_ID, location=LOCATION, state_manager=state_manager
-    )
-    print("  Imagen Diagram Visualizer (imagen-4.0-generate-001) initialized.")
+    try:
+        imagen_visualizer = ImagenDiagramVisualizer(
+            project_id=PROJECT_ID, location=LOCATION, state_manager=state_manager
+        )
+        print("  Imagen Diagram Visualizer (imagen-4.0-generate-001) initialized.", flush=True)
+    except Exception as e:
+        print(f"  Imagen Diagram Visualizer FAILED: {e}", flush=True)
 
     # 7. Initialize Veo 3 Diagram Animator (veo-3.0-generate-preview)
-    veo3_animator = Veo3DiagramAnimator(
-        project_id=PROJECT_ID, location=LOCATION, state_manager=state_manager
-    )
-    print("  Veo3 Diagram Animator (veo-3.0-generate-preview) initialized.")
+    try:
+        veo3_animator = Veo3DiagramAnimator(
+            project_id=PROJECT_ID, location=LOCATION, state_manager=state_manager
+        )
+        print("  Veo3 Diagram Animator (veo-3.0-generate-preview) initialized.", flush=True)
+    except Exception as e:
+        print(f"  Veo3 Diagram Animator FAILED: {e}", flush=True)
 
-    print("\n--- System Ready ---")
+    initialized = sum(1 for x in [state_manager, proof_orchestrator, vision_capture,
+                                    live_handler, diagram_renderer, imagen_visualizer,
+                                    veo3_animator] if x is not None)
+    print(f"\n--- System Ready ({initialized}/7 components) ---", flush=True)
 
 @app.on_event("startup")
 async def startup_event():
@@ -938,4 +1239,12 @@ async def startup_event():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        # Increase WebSocket ping timeout — Gemini's first response with
+        # proactive_audio can take 30-60s. Default 20s kills the connection.
+        ws_ping_interval=30,
+        ws_ping_timeout=60,
+    )

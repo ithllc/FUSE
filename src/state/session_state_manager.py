@@ -1,3 +1,6 @@
+# Copyright (c) 2026 ITH LLC. All rights reserved.
+# Licensed under AGPL-3.0. See LICENSE file for details.
+
 import redis
 import json
 import time
@@ -14,7 +17,8 @@ class SessionStateManager:
         Initializes the connection to the Redis Memory Store.
         In GCP production, 'host' will be the private IP of the Redis instance.
         """
-        self.r = redis.Redis(host=host, port=port, db=db, decode_responses=True)
+        self.r = redis.Redis(host=host, port=port, db=db, decode_responses=True,
+                              socket_timeout=3, socket_connect_timeout=3)
         self.session_id = "fuse-session-latest"
 
     def set_object_proxy(self, object_id: str, technical_role: str):
