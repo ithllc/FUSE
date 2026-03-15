@@ -70,8 +70,28 @@
             gap: 16px;
             min-height: 0;
         }
-        .left-column #videoPanel { flex: 2; min-height: 0; }
-        .left-column #chatPanel { flex: 1; min-height: 0; }
+        .left-column #videoPanel { flex: 1; min-height: 0; }
+        .left-column #chatPanel { flex: 1; min-height: 120px; overflow: hidden; }
+        .left-column .resize-handle {
+            height: 6px;
+            cursor: ns-resize;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .left-column .resize-handle:hover,
+        .left-column .resize-handle.dragging {
+            background: #30363d;
+        }
+        .left-column .resize-handle::after {
+            content: '';
+            width: 40px;
+            height: 3px;
+            border-radius: 2px;
+            background: #484f58;
+        }
         .panel {
             background: #161b22;
             border: 1px solid #30363d;
@@ -713,6 +733,8 @@
             </div>
 
             <!-- Session Notes -->
+            <!-- Resize handle between video and notes (issue #37) -->
+            <div class="resize-handle" id="resizeHandle" title="Drag to resize"></div>
             <div class="panel" id="chatPanel">
                 <div class="panel-header">
                     <h2>Session Notes</h2>
@@ -959,6 +981,10 @@ Powered by Gemini 3.1 Pro Preview.</div>
         // --- Diagram validity tracking (issues #34, #35) ---
         let diagramValid = false;
 
+        // --- Transcript buffering (issue #37) ---
+        // Accumulate partial transcripts and update in-place until finished
+        let _pendingTranscript = { user: null, fuse: null };
+
         // --- Session timeout ---
         const SESSION_MAX_MS = 5 * 60 * 1000; // 5 minutes
         const SESSION_WARN_MS = 4 * 60 * 1000; // warn at 4 minutes (1 min remaining)
@@ -969,6 +995,38 @@ Powered by Gemini 3.1 Pro Preview.</div>
         // Default OFF — continuous video frames cause Gemini audio stalls.
         // Vision is available on-demand via function calling (issue #19).
         let videoToGeminiEnabled = false;
+
+        // --- Resize handle for Session Notes (issue #37) ---
+        (function initResize() {
+            const handle = document.getElementById('resizeHandle');
+            const videoPanel = document.getElementById('videoPanel');
+            const chatPanel = document.getElementById('chatPanel');
+            if (!handle || !videoPanel || !chatPanel) return;
+            let startY, startVideoH, startChatH;
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                startY = e.clientY;
+                startVideoH = videoPanel.offsetHeight;
+                startChatH = chatPanel.offsetHeight;
+                handle.classList.add('dragging');
+                document.addEventListener('mousemove', onDrag);
+                document.addEventListener('mouseup', onUp);
+            });
+            function onDrag(e) {
+                const dy = e.clientY - startY;
+                const newVH = Math.max(100, startVideoH + dy);
+                const newCH = Math.max(100, startChatH - dy);
+                videoPanel.style.flex = 'none';
+                chatPanel.style.flex = 'none';
+                videoPanel.style.height = newVH + 'px';
+                chatPanel.style.height = newCH + 'px';
+            }
+            function onUp() {
+                handle.classList.remove('dragging');
+                document.removeEventListener('mousemove', onDrag);
+                document.removeEventListener('mouseup', onUp);
+            }
+        })();
 
         function toggleVideoToGemini() {
             videoToGeminiEnabled = !videoToGeminiEnabled;
@@ -1130,19 +1188,41 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         }
 
                         // Handle transcription messages (user speech + Gemini speech)
+                        // Buffer partials and update in-place until finished (issue #37)
                         if (data.type === 'transcript') {
-                            if (data.role === 'user') {
-                                addMsg('user', data.text);
-                                // Diagnostic: user speech detected via transcription
-                                if (sessionState === 'diagnostics' && !diagChecks.micInput && data.text.trim()) {
-                                    diagChecks.micInput = true;
-                                    addConnectionLog('DIAG: Microphone input PASS — speech transcribed: "' + data.text.substring(0, 40) + '"', 'ok');
-                                    addMsg('system', 'Diagnostic: Microphone working. Your speech was detected.');
-                                    checkDiagComplete();
+                            const role = data.role;
+                            const msgType = role === 'user' ? 'user' : 'fuse';
+
+                            if (_pendingTranscript[role]) {
+                                // Update existing pending message in-place
+                                _pendingTranscript[role].textContent = data.text;
+                                const list = document.getElementById('msgList');
+                                list.scrollTop = list.scrollHeight;
+                            } else {
+                                // Create new message element
+                                const list = document.getElementById('msgList');
+                                const div = document.createElement('div');
+                                div.className = 'msg ' + msgType;
+                                div.textContent = data.text;
+                                list.appendChild(div);
+                                list.scrollTop = list.scrollHeight;
+                                _pendingTranscript[role] = div;
+                            }
+
+                            // When finished, finalize and clear the pending reference
+                            if (data.finished) {
+                                _pendingTranscript[role] = null;
+                                if (role === 'fuse') {
+                                    checkForMermaid(data.text);
                                 }
-                            } else if (data.role === 'fuse') {
-                                addMsg('fuse', data.text);
-                                checkForMermaid(data.text);
+                            }
+
+                            // Diagnostic: user speech detected
+                            if (role === 'user' && sessionState === 'diagnostics' && !diagChecks.micInput && data.text.trim()) {
+                                diagChecks.micInput = true;
+                                addConnectionLog('DIAG: Microphone input PASS — speech transcribed: "' + data.text.substring(0, 40) + '"', 'ok');
+                                addMsg('system', 'Diagnostic: Microphone working. Your speech was detected.');
+                                checkDiagComplete();
                             }
                             return;
                         }
