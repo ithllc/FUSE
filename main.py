@@ -1094,6 +1094,13 @@ async def create_ephemeral_token(request: Request):
             }
         )
 
+        # Reset session state so new user starts clean (issue #40)
+        if state_manager:
+            try:
+                state_manager.reset_session()
+            except Exception as e:
+                logger.warning(f"EVENT=session_reset_error | error={e}")
+
         logger.info(
             f"EVENT=ephemeral_token_created"
             f" | token_prefix={token.name[:12]}"

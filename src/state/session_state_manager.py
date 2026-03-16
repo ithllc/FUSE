@@ -1,10 +1,13 @@
 # Copyright (c) 2026 ITH LLC. All rights reserved.
 # Licensed under AGPL-3.0. See LICENSE file for details.
 
+import logging
 import redis
 import json
 import time
 from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger("fuse.state")
 
 
 class SessionStateManager:
@@ -20,6 +23,27 @@ class SessionStateManager:
         self.r = redis.Redis(host=host, port=port, db=db, decode_responses=True,
                               socket_timeout=3, socket_connect_timeout=3)
         self.session_id = "fuse-session-latest"
+
+    def reset_session(self):
+        """Clears all Redis keys for the current session.
+
+        Called when a new ephemeral token is created to ensure each user
+        starts with a blank slate — no stale diagrams, proxies, or events
+        from previous sessions.
+        """
+        keys = [
+            f"{self.session_id}:architectural_state",
+            f"{self.session_id}:proxy_registry",
+            f"{self.session_id}:events",
+            f"{self.session_id}:vision_mode",
+        ]
+        deleted = 0
+        for key in keys:
+            deleted += self.r.delete(key)
+        logger.info(
+            f"EVENT=session_reset | session_id={self.session_id}"
+            f" | keys_deleted={deleted}"
+        )
 
     def set_object_proxy(self, object_id: str, technical_role: str):
         """Maps a visual object ID to a technical role (Proxy Object Registry)."""

@@ -227,20 +227,41 @@ class VisionStateCapture:
             return ""
 
     def _merge_or_replace(self, new_mermaid: str, existing_mermaid: str) -> str:
-        """If new output has far fewer connections than existing, keep existing."""
+        """Decides whether to replace existing diagram with new extraction.
+
+        If recent transcript context exists (user has been talking), trust
+        the extraction and allow replacement regardless of edge count — the
+        extraction was informed by the user's verbal description (issue #40).
+        Otherwise, apply conservative 50% edge threshold to guard against
+        noisy camera-only frames replacing a good diagram.
+        """
         if not existing_mermaid:
-            logger.info("EVENT=vision_merge | action=replace | new_edges=n/a | existing_edges=0")
+            logger.info("EVENT=vision_merge | action=replace | reason=no_existing | new_edges=n/a | existing_edges=0")
             return new_mermaid
+
         new_edges = len([l for l in new_mermaid.split("\n") if "-->" in l or "---" in l])
         existing_edges = len([l for l in existing_mermaid.split("\n") if "-->" in l or "---" in l])
+
+        # Check if transcript context is available (user has been talking)
+        has_transcript = bool(self.state_manager.get_recent_transcript(limit=3))
+
+        if has_transcript:
+            # Transcript-informed extraction — trust user intent (issue #40)
+            logger.info(
+                f"EVENT=vision_merge | action=replace | reason=transcript_context"
+                f" | new_edges={new_edges} | existing_edges={existing_edges}"
+            )
+            return new_mermaid
+
         if existing_edges > 0 and new_edges < existing_edges * 0.5:
             logger.info(
-                f"EVENT=vision_merge | action=keep_existing"
+                f"EVENT=vision_merge | action=keep_existing | reason=edge_threshold"
                 f" | new_edges={new_edges} | existing_edges={existing_edges}"
             )
             return existing_mermaid
+
         logger.info(
-            f"EVENT=vision_merge | action=replace"
+            f"EVENT=vision_merge | action=replace | reason=edge_threshold_passed"
             f" | new_edges={new_edges} | existing_edges={existing_edges}"
         )
         return new_mermaid
