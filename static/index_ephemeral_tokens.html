@@ -1072,14 +1072,22 @@ Powered by Gemini 3.1 Pro Preview.</div>
                 body: JSON.stringify({role: role, text: fullText}),
                 keepalive: true
             }).catch(() => {}); // fire-and-forget, don't block UI
+            // Track speech activity for silence detection (issue #40)
+            if (role === 'user') {
+                lastTranscriptTime = Date.now();
+                resetSilenceTimer();
+            }
         }
 
         // --- Brainstorming timer (issue #39) ---
         const BRAINSTORM_DURATION_MS = 135000; // 2 minutes 15 seconds
         const BRAINSTORM_WARN_MS = 120000;     // warn at 2:00 (15s remaining)
+        const SILENCE_TRIGGER_MS = 10000;      // trigger workflow after 10s of silence (issue #40)
         let brainstormingComplete = false;
         let brainstormWarnTimer = null;
         let brainstormCountdown = null;
+        let lastTranscriptTime = 0;
+        let silenceTimer = null;
 
         // --- Session timeout ---
         const SESSION_MAX_MS = 5 * 60 * 1000; // 5 minutes
@@ -1952,6 +1960,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
         let frameInFlight = false; // Backpressure: skip if previous frame still pending (#15)
         function sendVideoFrameHTTP() {
             if (frameInFlight) return; // Skip — previous frame still processing
+            if (brainstormingComplete) return; // Gate: no new frames after brainstorming ends (issue #39)
             const video = document.getElementById('localVideo');
             const canvas = document.getElementById('captureCanvas');
             canvas.width = 640;
@@ -1968,6 +1977,11 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         headers: { 'Content-Type': 'application/octet-stream' },
                         signal: AbortSignal.timeout(10000) // 10s timeout per frame
                     });
+                    // Read response and update diagram in real-time (issue #40)
+                    const data = await resp.json();
+                    if (data.status === 'success' && data.mermaid_length > 0) {
+                        await refreshMermaid();
+                    }
                 } catch (e) {
                     // Silently ignore frame send failures during streaming
                 } finally {
@@ -2619,9 +2633,24 @@ Powered by Gemini 3.1 Pro Preview.</div>
         function clearBrainstormTimer() {
             if (brainstormWarnTimer) { clearTimeout(brainstormWarnTimer); brainstormWarnTimer = null; }
             if (brainstormCountdown) { clearInterval(brainstormCountdown); brainstormCountdown = null; }
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
             brainstormingComplete = false;
+            lastTranscriptTime = 0;
             const timerEl = document.getElementById('brainstormTimer');
             if (timerEl) timerEl.style.display = 'none';
+        }
+
+        // --- Silence detection (issue #40) ---
+        function resetSilenceTimer() {
+            if (silenceTimer) clearTimeout(silenceTimer);
+            if (brainstormingComplete) return; // Already done
+            silenceTimer = setTimeout(() => {
+                if (brainstormingComplete) return;
+                if (!diagramValid) return; // No diagram to process
+                addMsg('system', 'No speech detected for 10 seconds. Processing your architecture...');
+                addConnectionLog('BRAINSTORM: Silence trigger — 10s without speech', 'ok');
+                onBrainstormingComplete();
+            }, SILENCE_TRIGGER_MS);
         }
 
         // --- System Status / Diagnostics ---
