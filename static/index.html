@@ -1205,7 +1205,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         if (data.type === 'transcript_aggregated') {
                             const msgType = data.role === 'user' ? 'user' : 'fuse';
                             addMsg(msgType, data.text);
-                            if (data.role === 'fuse') {
+                            if (false) { // Disabled: diagrams come from vision pipeline only (issue #32)
                                 checkForMermaid(data.text);
                             }
                             return;
@@ -1232,7 +1232,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
                         // Handle regular text messages (existing behavior)
                         if (data.text && !data.type) {
                             addMsg('fuse', data.text);
-                            checkForMermaid(data.text);
+                            // Do NOT render conversational text as Mermaid (issue #32)
+                            // Diagrams come from the vision pipeline only
                         }
                     } catch (e) {
                         addMsg('fuse', event.data);

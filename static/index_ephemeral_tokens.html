@@ -1040,9 +1040,6 @@ Powered by Gemini 3.1 Pro Preview.</div>
             _transcriptTimer[role] = null;
             const msgType = role === 'user' ? 'user' : 'fuse';
             addMsg(msgType, fullText);
-            if (role === 'fuse') {
-                checkForMermaid(fullText);
-            }
         }
 
         // --- Session timeout ---
@@ -1410,7 +1407,8 @@ Powered by Gemini 3.1 Pro Preview.</div>
                                     // Text parts (if model sends text alongside audio)
                                     if (part.text) {
                                         addMsg('fuse', part.text);
-                                        checkForMermaid(part.text);
+                                        // Do NOT try to render conversational text as Mermaid (issue #32)
+                                        // Diagrams come from the vision pipeline only (POST /vision/frame → /state/mermaid)
                                     }
                                 }
                             }
@@ -1460,8 +1458,15 @@ Powered by Gemini 3.1 Pro Preview.</div>
                                                         mermaid_length: data.mermaid_length || 0,
                                                         description: 'Captured and analyzed frame in ' + mode + ' mode. Mermaid output: ' + (data.mermaid_length || 0) + ' chars.'
                                                     };
-                                                    // Refresh diagram if mermaid was generated
-                                                    if (data.mermaid_length > 0) refreshMermaid();
+                                                    // Refresh diagram from server state (sequential pipeline)
+                                                    if (data.mermaid_length > 0) {
+                                                        await refreshMermaid();
+                                                        // Trigger sequential auto-workflow: validate → visualize → animate
+                                                        if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
+                                                        autoWorkflowDebounce = setTimeout(() => {
+                                                            if (sessionState === 'active' && diagramValid) runAutoWorkflow();
+                                                        }, 3000);
+                                                    }
                                                 } else {
                                                     result = { status: 'error', description: data.message || 'Vision processing failed' };
                                                 }
