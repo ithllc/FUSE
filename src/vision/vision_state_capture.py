@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 from google import genai
@@ -12,6 +13,8 @@ from src.vision.vision_prompts import (
     GENERIC_FALLBACK_PROMPT,
     build_context_block,
 )
+
+logger = logging.getLogger("fuse.vision")
 
 
 def sanitize_mermaid(text: str) -> str:
@@ -99,14 +102,21 @@ class VisionStateCapture:
 
         # 1. Determine vision mode
         vision_mode = self.state_manager.get_vision_mode()
+        logger.info(
+            f"EVENT=vision_frame_received | mode={vision_mode}"
+            f" | frame_size={len(frame_bytes)}"
+        )
 
         # 2. Pass 1: Scene classification (skip if mode is explicit)
+        t_classify = time.time()
+        cached = False
         if vision_mode == "auto":
             if self._cached_scene and self._cache_hits < self._cache_max:
                 scene_type = self._cached_scene["scene_type"]
                 bbox = self._cached_scene.get("bounding_box")
                 confidence = self._cached_scene.get("confidence", 0.0)
                 self._cache_hits += 1
+                cached = True
             else:
                 classification = self.scene_classifier.classify(frame_bytes)
                 scene_type = classification["scene_type"]
@@ -118,6 +128,12 @@ class VisionStateCapture:
             scene_type = vision_mode
             bbox = None
             confidence = 1.0
+        classify_ms = int((time.time() - t_classify) * 1000)
+        logger.info(
+            f"EVENT=vision_classification | scene_type={scene_type}"
+            f" | confidence={confidence:.2f} | cached={cached}"
+            f" | latency_ms={classify_ms}"
+        )
 
         # 3. ROI crop if bounding box available and confidence is sufficient
         if bbox and confidence >= 0.6:
@@ -129,7 +145,13 @@ class VisionStateCapture:
         prompt = self._build_prompt(scene_type)
 
         # 5. Pass 2: Extract with mode-specific prompt
+        t_extract = time.time()
         mermaid_code = self._extract(cropped, prompt)
+        extract_ms = int((time.time() - t_extract) * 1000)
+        logger.info(
+            f"EVENT=vision_extraction | mermaid_length={len(mermaid_code)}"
+            f" | latency_ms={extract_ms}"
+        )
 
         # 6. Merge heuristic: avoid replacing a rich diagram with a partial view
         if mermaid_code:
@@ -144,6 +166,16 @@ class VisionStateCapture:
                 "mermaid_length": len(mermaid_code),
                 "latency_ms": elapsed_ms,
             })
+            logger.info(
+                f"EVENT=vision_pipeline_complete | total_latency_ms={elapsed_ms}"
+                f" | scene_type={scene_type} | mermaid_length={len(mermaid_code)}"
+            )
+        else:
+            elapsed_ms = int((time.time() - t_start) * 1000)
+            logger.info(
+                f"EVENT=vision_pipeline_complete | total_latency_ms={elapsed_ms}"
+                f" | scene_type={scene_type} | mermaid_length=0 | outcome=no_mermaid"
+            )
 
         return mermaid_code
 
@@ -191,17 +223,26 @@ class VisionStateCapture:
             text = response.text.strip() if response.text else ""
             return sanitize_mermaid(text)
         except Exception as e:
-            print(f"Vision extraction error: {e}")
+            logger.warning(f"EVENT=vision_extraction_error | error={e}")
             return ""
 
     def _merge_or_replace(self, new_mermaid: str, existing_mermaid: str) -> str:
         """If new output has far fewer connections than existing, keep existing."""
         if not existing_mermaid:
+            logger.info("EVENT=vision_merge | action=replace | new_edges=n/a | existing_edges=0")
             return new_mermaid
         new_edges = len([l for l in new_mermaid.split("\n") if "-->" in l or "---" in l])
         existing_edges = len([l for l in existing_mermaid.split("\n") if "-->" in l or "---" in l])
         if existing_edges > 0 and new_edges < existing_edges * 0.5:
+            logger.info(
+                f"EVENT=vision_merge | action=keep_existing"
+                f" | new_edges={new_edges} | existing_edges={existing_edges}"
+            )
             return existing_mermaid
+        logger.info(
+            f"EVENT=vision_merge | action=replace"
+            f" | new_edges={new_edges} | existing_edges={existing_edges}"
+        )
         return new_mermaid
 
 

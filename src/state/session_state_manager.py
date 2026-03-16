@@ -74,11 +74,14 @@ class SessionStateManager:
     def get_recent_transcript(self, limit: int = 5) -> str:
         """Returns last N transcript events as a single string for context injection."""
         events = self.get_events(limit=limit * 3)  # Over-fetch, filter to transcript types
-        transcript_events = [e for e in events if e.get("type") in ("voice_input", "proxy_assignment")]
+        transcript_events = [e for e in events if e.get("type") in ("transcript", "voice_input", "proxy_assignment")]
         lines = []
         for e in transcript_events[:limit]:
             payload = e.get("payload", {})
-            lines.append(payload.get("text", payload.get("role", str(payload))))
+            role = payload.get("role", "")
+            text = payload.get("text", str(payload))
+            prefix = f"[{role}] " if role else ""
+            lines.append(f"{prefix}{text}")
         return "\n".join(lines) if lines else ""
 
     def get_session_diagnostics(self) -> Dict[str, Any]:

@@ -465,6 +465,28 @@
         .countdown-banner.visible { display: block; }
         @keyframes pulse-bg { 0%, 100% { opacity: 1; } 50% { opacity: 0.85; } }
 
+        /* Brainstorming timer (issue #39) */
+        .brainstorm-timer {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: #238636;
+            color: #ffffff;
+            font-weight: 600;
+            min-width: 50px;
+            text-align: center;
+        }
+        .brainstorm-timer.warning {
+            background: #d29922;
+            animation: pulse-warn 1s ease-in-out infinite;
+        }
+        .brainstorm-timer.complete {
+            background: #388bfd;
+            font-size: 12px;
+        }
+        @keyframes pulse-warn { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
         /* System Status Panel */
         #systemStatusPanel .health-ok { color: #3fb950; }
         #systemStatusPanel .health-error { color: #f85149; }
@@ -688,6 +710,9 @@
             <span>Collaborative Brainstorming Intelligence</span>
         </div>
         <div class="btn-group">
+            <div id="brainstormTimer" class="brainstorm-timer" style="display:none;">
+                <span id="brainstormTimeLeft">2:15</span>
+            </div>
             <button class="btn btn-sm" onclick="toggleSystemStatus()" title="System Status">&#9881; Status</button>
             <button class="btn btn-blue" id="btnConnect" onclick="toggleWebSocket()" disabled style="opacity:0.5;cursor:not-allowed;">Loading...</button>
             <div class="status-badge disconnected" id="statusBadge">
@@ -1040,7 +1065,21 @@ Powered by Gemini 3.1 Pro Preview.</div>
             _transcriptTimer[role] = null;
             const msgType = role === 'user' ? 'user' : 'fuse';
             addMsg(msgType, fullText);
+            // Relay transcript to server for vision pipeline context (issue #39)
+            fetch(BASE + '/api/transcript', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({role: role, text: fullText}),
+                keepalive: true
+            }).catch(() => {}); // fire-and-forget, don't block UI
         }
+
+        // --- Brainstorming timer (issue #39) ---
+        const BRAINSTORM_DURATION_MS = 135000; // 2 minutes 15 seconds
+        const BRAINSTORM_WARN_MS = 120000;     // warn at 2:00 (15s remaining)
+        let brainstormingComplete = false;
+        let brainstormWarnTimer = null;
+        let brainstormCountdown = null;
 
         // --- Session timeout ---
         const SESSION_MAX_MS = 5 * 60 * 1000; // 5 minutes
@@ -1147,6 +1186,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
             ws = null;
             setStatus(false);
             clearSessionTimer();
+            clearBrainstormTimer(); // issue #39
             if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
             // Stop video streaming to Live API (issue #22)
             if (videoFrameInterval) { clearInterval(videoFrameInterval); videoFrameInterval = null; }
@@ -1329,6 +1369,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
                                 // Start session timer
                                 startSessionTimer();
+                                startBrainstormTimer(); // issue #39
 
                                 // Trigger Gemini greeting after 10s
                                 setTimeout(() => {
@@ -1433,6 +1474,14 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
                                 try {
                                     if (funcName === 'capture_and_analyze_frame') {
+                                        // Gate: skip vision capture after brainstorming timer expires (issue #39)
+                                        if (brainstormingComplete) {
+                                            result = {
+                                                status: 'brainstorming_complete',
+                                                description: 'Brainstorming phase has ended (2:15 timer expired). Processing the captured architecture.'
+                                            };
+                                            addMsg('system', 'TOOL: Vision capture skipped — brainstorming phase complete.');
+                                        } else {
                                         const mode = funcArgs.mode || 'auto';
                                         // Capture latest frame from camera and send to vision pipeline
                                         const video = document.getElementById('localVideo');
@@ -1461,11 +1510,13 @@ Powered by Gemini 3.1 Pro Preview.</div>
                                                     // Refresh diagram from server state (sequential pipeline)
                                                     if (data.mermaid_length > 0) {
                                                         await refreshMermaid();
-                                                        // Trigger sequential auto-workflow: validate → visualize → animate
-                                                        if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
-                                                        autoWorkflowDebounce = setTimeout(() => {
-                                                            if (sessionState === 'active' && diagramValid) runAutoWorkflow();
-                                                        }, 3000);
+                                                        // Only debounce auto-workflow if brainstorming still active (issue #39)
+                                                        if (!brainstormingComplete) {
+                                                            if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
+                                                            autoWorkflowDebounce = setTimeout(() => {
+                                                                if (sessionState === 'active' && diagramValid) runAutoWorkflow();
+                                                            }, 3000);
+                                                        }
                                                     }
                                                 } else {
                                                     result = { status: 'error', description: data.message || 'Vision processing failed' };
@@ -1477,6 +1528,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                                             result = { status: 'no_frame', description: 'Camera not active or no video available.' };
                                         }
                                         addMsg('system', 'TOOL RESULT: Vision capture (' + mode + ') — ' + (result.description || result.status));
+                                        } // close brainstormingComplete else block (issue #39)
 
                                     } else if (funcName === 'get_session_context') {
                                         // Fetch current diagram + session health
@@ -1609,6 +1661,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
                     ws = null;
                     setStatus(false);
                     clearSessionTimer();
+                    clearBrainstormTimer(); // issue #39
                     if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
                     if (videoFrameInterval) { clearInterval(videoFrameInterval); videoFrameInterval = null; }
                     document.getElementById('btnConnect').textContent = 'Start Session';
@@ -2502,6 +2555,75 @@ Powered by Gemini 3.1 Pro Preview.</div>
             document.getElementById('countdownBanner').classList.remove('visible');
         }
 
+        // --- Brainstorming timer functions (issue #39) ---
+        function startBrainstormTimer() {
+            clearBrainstormTimer();
+            brainstormingComplete = false;
+            const timerEl = document.getElementById('brainstormTimer');
+            const timeEl = document.getElementById('brainstormTimeLeft');
+            timerEl.style.display = '';
+            timerEl.className = 'brainstorm-timer';
+
+            let remaining = BRAINSTORM_DURATION_MS;
+
+            function updateDisplay() {
+                const secs = Math.ceil(remaining / 1000);
+                const m = Math.floor(secs / 60);
+                const s = secs % 60;
+                timeEl.textContent = m + ':' + String(s).padStart(2, '0');
+            }
+            updateDisplay();
+
+            brainstormCountdown = setInterval(() => {
+                remaining -= 1000;
+                if (remaining <= 0) remaining = 0;
+                updateDisplay();
+                if (remaining <= 0) {
+                    clearInterval(brainstormCountdown);
+                    brainstormCountdown = null;
+                    onBrainstormingComplete();
+                }
+            }, 1000);
+
+            // Warning at 15 seconds remaining
+            brainstormWarnTimer = setTimeout(() => {
+                timerEl.classList.add('warning');
+                addMsg('system', '15 seconds remaining to describe your idea.');
+                addConnectionLog('BRAINSTORM: 15s warning', 'error');
+            }, BRAINSTORM_WARN_MS);
+
+            addConnectionLog('BRAINSTORM: Timer started (2:15)', 'ok');
+        }
+
+        function onBrainstormingComplete() {
+            brainstormingComplete = true;
+            const timerEl = document.getElementById('brainstormTimer');
+            timerEl.className = 'brainstorm-timer complete';
+            document.getElementById('brainstormTimeLeft').textContent = 'Processing...';
+            addMsg('system', 'Brainstorming phase complete. Processing your architecture...');
+            addConnectionLog('BRAINSTORM: Timer expired — gating vision input, triggering workflow', 'ok');
+
+            // Clear any pending auto-workflow debounce and trigger immediately
+            if (autoWorkflowDebounce) clearTimeout(autoWorkflowDebounce);
+            autoWorkflowDebounce = null;
+
+            // Trigger final auto-workflow if we have a valid diagram
+            if (diagramValid) {
+                runAutoWorkflow();
+            } else {
+                addConnectionLog('BRAINSTORM: No valid diagram to process', 'error');
+                document.getElementById('brainstormTimeLeft').textContent = 'Complete';
+            }
+        }
+
+        function clearBrainstormTimer() {
+            if (brainstormWarnTimer) { clearTimeout(brainstormWarnTimer); brainstormWarnTimer = null; }
+            if (brainstormCountdown) { clearInterval(brainstormCountdown); brainstormCountdown = null; }
+            brainstormingComplete = false;
+            const timerEl = document.getElementById('brainstormTimer');
+            if (timerEl) timerEl.style.display = 'none';
+        }
+
         // --- System Status / Diagnostics ---
         let connectionLog = [];
 
@@ -2734,6 +2856,7 @@ Powered by Gemini 3.1 Pro Preview.</div>
 
             // Start 5-minute session timer now (not during diagnostics)
             startSessionTimer();
+            startBrainstormTimer(); // issue #39
         }
 
         // --- Toast ---

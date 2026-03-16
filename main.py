@@ -1157,6 +1157,46 @@ async def log_session_event(request: Request):
         return {"status": "error", "message": str(e)}
 
 
+# --- Transcript Bridge (Issue #39) ---
+_VALID_TRANSCRIPT_ROLES = {"user", "fuse"}
+
+@app.post("/api/transcript")
+async def receive_transcript(request: Request):
+    """Receives transcript text from ephemeral token page for Redis storage.
+
+    Bridges browser-side Gemini audio transcripts to server-side vision pipeline
+    context. Without this, the vision pipeline has no knowledge of what the user
+    said when generating architecture diagrams.
+    """
+    try:
+        body = await request.body()
+        if len(body) > 4096:
+            return {"status": "error", "message": "Payload too large (max 4KB)"}
+
+        data = json.loads(body)
+        role = data.get("role", "")
+        text = data.get("text", "").strip()
+
+        if role not in _VALID_TRANSCRIPT_ROLES:
+            return {"status": "error", "message": f"Invalid role: {role}"}
+        if not text:
+            return {"status": "error", "message": "Empty transcript text"}
+
+        if state_manager:
+            try:
+                state_manager.log_event("transcript", {"role": role, "text": text})
+            except Exception as e:
+                logger.warning(f"EVENT=transcript_bridge_error | error={e}")
+
+        logger.info(f"EVENT=transcript_bridge | role={role} | length={len(text)}")
+        return {"status": "ok"}
+    except json.JSONDecodeError:
+        return {"status": "error", "message": "Invalid JSON"}
+    except Exception as e:
+        logger.warning(f"EVENT=transcript_bridge_error | error={e}")
+        return {"status": "error", "message": str(e)}
+
+
 # --- Tool Call Event Logging (Issue #30) ---
 _VALID_TOOL_FUNCTIONS = {"capture_and_analyze_frame", "get_session_context", "set_proxy_object"}
 
